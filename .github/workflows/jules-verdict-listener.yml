@@ -1,0 +1,37 @@
+name: "Jules - Listener de Veredictos del Sandbox"
+
+on:
+  issue_comment:
+    types: [ created ]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  statuses: write
+
+jobs:
+  procesar-veredicto-sandbox:
+    name: Procesar Veredicto de Sandbox Jules
+    runs-on: ubuntu-latest
+
+    if: >
+      contains(github.event.issue.labels.*.name, 'jules') ||
+      startsWith(github.event.issue.title, '[jules]')
+
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Procesar Comentario y Actualizar Status Check
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_API_URL: ${{ github.api_url }}
+        run: |
+          node .github/scripts/jules-verdict-processor.js

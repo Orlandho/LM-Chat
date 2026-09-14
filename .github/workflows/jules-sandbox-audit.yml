@@ -1,0 +1,46 @@
+name: "Jules - Auditoría en Sandbox Virtual y Veredicto"
+
+on:
+  pull_request:
+    branches: [ main ]
+    types: [ opened, synchronize, reopened, labeled ]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "Número del Pull Request a auditar"
+        required: false
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  statuses: write
+
+jobs:
+  auditar-sandbox-jules:
+    name: Veredicto de Auditoría en Sandbox de Jules
+    runs-on: ubuntu-latest
+
+    if: >
+      github.event_name != 'pull_request' ||
+      github.event.action != 'labeled' ||
+      (github.event.label.name == 'reintentar-jules' || github.event.label.name == 'jules-audit')
+
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Despachar Sesión a Google Jules y Ejecutar Watchdog de Veredicto
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_API_URL: ${{ github.api_url }}
+          WATCHDOG_TIMEOUT_MINUTES: 10
+          POLL_INTERVAL_SECONDS: 25
+        run: |
+          node .github/scripts/jules-sandbox-dispatcher.js

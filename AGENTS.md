@@ -100,3 +100,27 @@ In `.github/workflows/release.yml`, releases automatically build a zip archive w
 For multi-agent swarms operating within this repository:
 - **No Agent Works Alone:** Always collaborate, review, and validate with peer agents (e.g. Supervisor, Atenea, Hermes, Jules).
 - **Mutual Responsibility:** Double-check configurations, respect host security rules (e.g. Bitdefender Total Security safe practices, no port scans or chained remote PowerShell bursts), and preserve workspace integrity.
+
+---
+
+## ☁️ 7. Google Jules Cloud Sandbox Audit & Mandatory Status Checks
+
+To ensure that no change is merged into `main` without comprehensive validation by both automated test runners and cloud AI agents, this repository enforces a 2-Tier Verification Architecture:
+
+- **Mermaid Source:** [`docs/diagrams/jules_cloud_sandbox_audit.mmd`](docs/diagrams/jules_cloud_sandbox_audit.mmd)
+- **High-Resolution Vector SVG:** [`docs/diagrams/jules_cloud_sandbox_audit.svg`](docs/diagrams/jules_cloud_sandbox_audit.svg)
+
+```mermaid
+flowchart TD
+    PR["Pull Request to 'main'"] --> FastCI["Tier 1: Fast & Deterministic CI (15s)\npytest tests/ -v with Omniverse Mocks"]
+    PR --> JulesAudit["Tier 2: Jules Virtual Sandbox (jules.google.com)\nVeredicto de Auditoría en Sandbox de Jules"]
+    FastCI & JulesAudit --> RulesetCheck{"Are all required checks\nin SUCCESS state?"}
+    RulesetCheck -- "Yes" --> MergeAllowed["Merge Allowed (Squash Merge)"]
+    RulesetCheck -- "No" --> MergeBlocked["Merge Blocked (HTTP 405 Method Not Allowed)"]
+```
+
+### 7.1. Enforcement Rules
+1. **Tier 1 (Fast CI):** `pytest tests/ -v --tb=short` runs on Ubuntu runners (validating Omniverse mocks, OpenUSD context, and MCP registry).
+2. **Tier 2 (Jules Cloud Sandbox):** A GitHub Issue tagged `jules` is dispatched for each Pull Request, spawning an autonomous work session on [`jules.google.com/session`](https://jules.google.com/session).
+3. **Status Check:** `Veredicto de Auditoría en Sandbox de Jules` remains in `PENDING` until Jules posts `VEREDICTO: APROBADO`.
+4. **Resilience & Watchdog:** 10-minute timeout with diagnostic logs and PR remediation guidance in case of asynchronous errors or missing repo authorizations.
