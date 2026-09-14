@@ -1,0 +1,13 @@
+repos:
+  - repo: https://github.com/commitizen-tools/commitizen
+    rev: v4.18.1
+    hooks:
+      - id: commitizen
+        stages: [commit-msg]
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-yaml
+      - id: check-toml
+      - id: end-of-file-fixer
+      - id: trailing-whitespace

@@ -1,0 +1,98 @@
+name: LM-Chat Automated Release & SemVer Pipeline
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  test:
+    name: Validate Test Suite
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-asyncio pytest-mock aiohttp pydantic
+
+      - name: Run Test Suite
+        run: |
+          python -m pytest tests/ -v --tb=short
+
+  release:
+    name: Automated SemVer Bump & Package Extension
+    needs: test
+    if: "!startsWith(github.event.head_commit.message, 'bump:')"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Commitizen
+        run: |
+          pip install commitizen
+
+      - name: Run Commitizen Version Bump
+        id: cz
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          
+          # Attempt bump based on conventional commits
+          cz bump --yes --changelog || echo "NO_BUMP=true" >> $GITHUB_ENV
+          
+          CURRENT_VERSION=$(cz version -p)
+          echo "VERSION=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+          echo "TAG=v$CURRENT_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Push Version Bump & Tag
+        if: env.NO_BUMP != 'true'
+        run: |
+          git push origin main --tags
+
+      - name: Package Omniverse Extension Archive
+        if: env.NO_BUMP != 'true'
+        run: |
+          # Package according to strict Omniverse Kit standards (folder name: omni.lm_chat)
+          mkdir -p package_staging/omni.lm_chat
+          cp -r config extension.py logic ui core mcp cli README.md LICENSE package_staging/omni.lm_chat/
+          cd package_staging
+          zip -r ../omni.lm_chat-${{ steps.cz.outputs.TAG }}.zip omni.lm_chat
+          cd ..
+          rm -rf package_staging
+
+      - name: Create GitHub Release
+        if: env.NO_BUMP != 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.cz.outputs.TAG }}
+          name: LM-Chat ${{ steps.cz.outputs.TAG }}
+          body_path: docs/CHANGELOG.md
+          draft: false
+          prerelease: false
+          files: |
+            omni.lm_chat-${{ steps.cz.outputs.TAG }}.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
