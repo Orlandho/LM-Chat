@@ -8,4 +8,7 @@
 # without an express license agreement from NVIDIA CORPORATION or
 # its affiliates is strictly prohibited.
 
-from .extension import *
+try:
+    from .extension import *
+except ImportError:
+    pass
