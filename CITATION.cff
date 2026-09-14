@@ -5,20 +5,22 @@ authors:
     given-names: "Orlando Jesús"
     affiliation: "Universidad Privada del Norte"
     orcid: "https://orcid.org/0009-0007-4312-108X"
-title: "Agentic AI Chat for NVIDIA Omniverse"
+title: "LM-Chat™: Autonomous Spatial AI Assistant & Copilot for NVIDIA Omniverse"
 abstract: >-
-  Implementación avanzada de un chat con IA agéntica para el ecosistema NVIDIA Omniverse. 
-  Actúa como un asistente híbrido capaz de mantener conversaciones naturales y manipular 
-  geometría 3D en OpenUSD mediante un bucle de autorreflexión (Self-Healing).
-version: 0.0.37
-date-released: 2026-05-08
+  Suite empresarial de IA espacial agéntica para el ecosistema NVIDIA Omniverse.
+  Permite generar, manipular, simular y corregir geometría y cinemática 3D
+  en OpenUSD mediante modelos de lenguaje locales (LM Studio, Ollama, vLLM)
+  y en la nube (Gemini, Claude, OpenAI) con bucle ReAct y MCP.
+version: 1.0.0
+date-released: 2026-09-14
 url: "https://github.com/Orlandho/LM-Chat"
 repository-code: "https://github.com/Orlandho/LM-Chat"
 keywords:
   - "NVIDIA Omniverse"
   - "OpenUSD"
+  - "LM-Chat"
   - "Agentic AI"
   - "Spatial AI"
   - "Python"
   - "ReAct Pattern"
-license: Apache-2.0
+license: MIT

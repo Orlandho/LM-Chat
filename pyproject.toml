@@ -1,0 +1,33 @@
+[project]
+name = "omni-lm-chat"
+version = "1.0.0"
+description = "LM-Chat™: Autonomous Spatial AI Assistant & Neural Copilot for NVIDIA Omniverse"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "Orlando Dorival" }
+]
+keywords = [
+    "nvidia", "omniverse", "openusd", "ai", "spatial-ai",
+    "lm-studio", "gemini", "ollama", "mcp", "copilot"
+]
+
+[tool.commitizen]
+name = "cz_conventional_commits"
+tag_format = "v$version"
+version_scheme = "semver"
+version_provider = "pep621"
+update_changelog_on_bump = true
+changelog_file = "docs/CHANGELOG.md"
+version_files = [
+    "config/extension.toml:^version = \"(?P<current>.*)\"",
+    "__init__.py:^__version__ = \"(?P<current>.*)\"",
+    "CITATION.cff:^version: (?P<current>.*)"
+]
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+python_files = ["test_*.py"]
