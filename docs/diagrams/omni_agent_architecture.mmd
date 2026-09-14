@@ -1,0 +1,45 @@
+graph TD
+    subgraph UI ["🖥️ Interfaces de Usuario"]
+        GUI["🌟 Omniverse Native GUI (omni.ui) - Interfaz Principal"]
+        CLI["⚡ OmniAgent CLI Harness - Interfaz Secundaria / Enterprise"]
+    end
+
+    subgraph Core ["🧠 OmniAgent Harness Core"]
+        ROUTER["Router Multi-Proveedor (Inference Router)"]
+        STAGE_CTX["USD Stage Context Serializer"]
+        EXEC["Execution Engine & Sandbox (Command Pattern)"]
+        MCP_CLIENT["Omniverse MCP Client Registry"]
+        SELF_HEAL["Bucle ReAct & Self-Healing Reflection"]
+    end
+
+    subgraph Engines ["⚙️ Inferencia Local & Cloud"]
+        LM_STUDIO["LM Studio Server (:1234)"]
+        OLLAMA["Ollama Server (:11434)"]
+        VLLM["vLLM Enterprise Engine (:8000)"]
+        ENTERPRISE["Modelos Empresariales (Nemotron 70B, Llama 3, Qwen Coder)"]
+        CLOUD["APIs Híbridas (Anthropic, OpenAI, Gemini)"]
+    end
+
+    subgraph Omniverse ["🌌 Ecosistema NVIDIA Omniverse Kit"]
+        CMD["omni.kit.commands (Undo / Redo Nativo)"]
+        USD[("OpenUSD Stage (Prims, Xforms, Materials, Lights)")]
+        MDL["Materiales MDL & Shaders"]
+    end
+
+    UI --> ROUTER
+    ROUTER <--> LM_STUDIO
+    ROUTER <--> OLLAMA
+    ROUTER <--> VLLM
+    ROUTER <--> ENTERPRISE
+    ROUTER <--> CLOUD
+
+    USD --> STAGE_CTX --> ROUTER
+    ROUTER --> EXEC
+    EXEC --> CMD
+    CMD --> USD
+    CMD --> MDL
+    
+    EXEC -->|"Traceback / Excepción"| SELF_HEAL
+    SELF_HEAL -->|"Prompt de Auto-Corrección"| ROUTER
+
+    ROUTER <-->|"Herramientas Documentales / Código / GDrive"| MCP_CLIENT
