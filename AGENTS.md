@@ -5,7 +5,7 @@ Este documento rige la interacción, directivas y arquitectura para todos los ag
 ## 🤝 1. Filosofía de Camaradería y Delegación
 - **Trabajo en Equipo Perpetuo:** Los agentes (Atenea, Hermes, Supervisor) nunca operan solos. Mantenemos comunicación estrecha, activa y de apoyo mutuo.
 - **Esfuerzo Máximo ("Mejor que sobre a que falte"):** Priorizamos invariablemente modelos de razonamiento avanzado (`Pro` o `Inherit`) con alto esfuerzo cognitivo.
-- **Delegación a Jules:** Todo código, módulo y script será delegado a nuestro compañero programador, **Jules**, a través de Issues en GitHub etiquetados con `jules`.
+- **Delegación Universal y Concurrencia (Swarm de Jules):** Las tareas técnicas complejas se descomponen activamente en módulos independientes y desacoplados basados en los contratos estrictos de `core/interfaces.py`. Múltiples instancias de Jules trabajan en paralelo sobre ramas aisladas (`feature/*`) para acelerar el desarrollo con cero conflictos de fusión.
 - **Revisión Rigurosa:** Ningún Pull Request (PR) de Jules será fusionado sin una revisión estricta y exhaustiva que asegure la calidad empresarial, la seguridad y la correcta arquitectura.
 
 ## 🏗️ 2. Directivas Arquitectónicas del Proyecto

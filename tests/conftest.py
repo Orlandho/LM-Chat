@@ -1,26 +1,51 @@
 import sys
 from unittest.mock import MagicMock
 
-# Mocks para evadir los requisitos de ejecución nativa de Omniverse Kit.
-# Permite que Jules pueda ejecutar pytest en cualquier entorno (CI/CD o local) sin lanzar el software 3D.
-class OmniMock(MagicMock):
-    pass
+# Mocks Avanzados para Tests Unitarios Aislados (Swarm / Jules Concurrente)
+# Cada mock expone un comportamiento específico para evitar colisiones entre issues paralelos.
 
-class PxrMock(MagicMock):
-    pass
+class OmniUIMock(MagicMock):
+    """Mock especializado para omni.ui (GUI)."""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.Window = MagicMock
+        self.Frame = MagicMock
+        self.VStack = MagicMock
+        self.HStack = MagicMock
+        self.Button = MagicMock
+        self.Label = MagicMock
 
-sys.modules['omni'] = OmniMock()
-sys.modules['omni.ext'] = OmniMock()
-sys.modules['omni.ui'] = OmniMock()
-sys.modules['omni.usd'] = OmniMock()
-sys.modules['omni.kit'] = OmniMock()
-sys.modules['omni.kit.test'] = OmniMock()
-sys.modules['omni.kit.ui_test'] = OmniMock()
+class UsdContextMock(MagicMock):
+    """Mock especializado para pxr.Usd y omni.usd (Contexto USD)."""
+    def get_context(self):
+        ctx = MagicMock()
+        ctx.get_stage.return_value = MagicMock()
+        return ctx
+    def get_stage(self):
+        return MagicMock()
 
-sys.modules['pxr'] = PxrMock()
-sys.modules['pxr.Usd'] = PxrMock()
-sys.modules['pxr.UsdGeom'] = PxrMock()
-sys.modules['pxr.Gf'] = PxrMock()
-sys.modules['pxr.Sdf'] = PxrMock()
+class MCPClientMock(MagicMock):
+    """Mock especializado para llamadas a servidores MCP (Lectura de documentos, APIs)."""
+    async def call_tool(self, server, tool, args):
+        return {"status": "success", "data": "mocked_data"}
 
-print("[Jules Test Framework] Módulos de Omniverse y OpenUSD interceptados y emulados exitosamente.")
+class ExecutionSandboxMock(MagicMock):
+    """Mock especializado para el Execution Sandbox (Self-Healing)."""
+    def execute_code(self, code_string):
+        return {"success": True, "output": "Execution mocked"}
+
+# Inyección de módulos simulados al sistema
+sys.modules['omni'] = MagicMock()
+sys.modules['omni.ext'] = MagicMock()
+sys.modules['omni.ui'] = OmniUIMock()
+sys.modules['omni.usd'] = UsdContextMock()
+sys.modules['omni.kit'] = MagicMock()
+
+sys.modules['pxr'] = MagicMock()
+sys.modules['pxr.Usd'] = UsdContextMock()
+sys.modules['pxr.UsdGeom'] = MagicMock()
+
+sys.modules['mcp_client'] = MCPClientMock()
+sys.modules['execution_sandbox'] = ExecutionSandboxMock()
+
+print("[Jules Test Framework] Módulos de Omniverse, MCP y Sandbox aislados y emulados exitosamente.")
