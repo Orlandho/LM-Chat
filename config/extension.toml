@@ -1,0 +1,20 @@
+[package]
+title = "LM-Chat"
+description = "LM-Chat: Autonomous Spatial AI Assistant & Neural Copilot for NVIDIA Omniverse"
+version = "1.0.0"
+category = "AI"
+keywords = ["ai", "llm", "spatial-ai", "lm-studio", "gemini", "ollama", "mcp", "usd", "omniverse", "copilot"]
+changelog = "docs/CHANGELOG.md"
+readme = "README.md"
+authors = ["Orlando Dorival"]
+repository = "https://github.com/orlandodorival/LM-Chat"
+
+[package.write_protect]
+enabled = false
+
+[[python.module]]
+name = "omni.lm_chat"
+
+[dependencies]
+"omni.kit.uiapp" = {}
+"omni.usd" = {}

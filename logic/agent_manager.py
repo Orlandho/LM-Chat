@@ -127,7 +127,7 @@ class AgentManager:
                         elif error_type == "TimeoutError":
                             error_message = chunk_obj.get("message", "Tiempo de espera agotado")
                         else:
-                            print(f"[orlandoexplorer.ia_test] Error: {chunk_obj.get('message')}")
+                            print(f"[omni.lm_chat] Error: {chunk_obj.get('message')}")
                             error_message = f"Excepción en petición LLM: {chunk_obj.get('message')}"
                         break
 
@@ -151,8 +151,8 @@ class AgentManager:
                         return full_content + success_msg
                     else:
                         error_msg = exec_result.get("error_msg")
-                        print(f"[orlandoexplorer.ia_test] Error en la ejecución del código: {error_msg}")
-                        print(f"[orlandoexplorer.ia_test] Código que falló:\n{extracted_code}")
+                        print(f"[omni.lm_chat] Error en la ejecución del código: {error_msg}")
+                        print(f"[omni.lm_chat] Código que falló:\n{extracted_code}")
 
                         if attempt < max_retries:
                             retry_msg = f"\n\n[Sistema: Error detectado. Intento de autocorrección {attempt + 1} de {max_retries}...]"
@@ -178,7 +178,7 @@ class AgentManager:
                             final_err = f"\n\n[Sistema: Se agotaron los reintentos. Último error: {error_msg}]"
                             if append_callback:
                                 append_callback(final_err)
-                            print(f"[orlandoexplorer.ia_test] {final_err}")
+                            print(f"[omni.lm_chat] {final_err}")
                             return full_content + final_err
                 else:
                     # Normal conversation without code
@@ -186,7 +186,7 @@ class AgentManager:
                     return full_content
 
             except Exception as e:
-                print(f"[orlandoexplorer.ia_test] Error asíncrono en AgentManager: {e}")
+                print(f"[omni.lm_chat] Error asíncrono en AgentManager: {e}")
                 return f"Excepción en la ejecución asíncrona: {str(e)}"
 
         return "Flujo finalizado inesperadamente."

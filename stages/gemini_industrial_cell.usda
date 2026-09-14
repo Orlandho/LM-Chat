@@ -1,0 +1,311 @@
+#usda 1.0
+(
+    defaultPrim = "World"
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+
+def Xform "World"
+{
+    def Scope "Materials"
+    {
+        def Material "AerospaceAluminum"
+        {
+            token outputs:surface.connect = </World/Materials/AerospaceAluminum/PBRShader.outputs:surface>
+
+            def Shader "PBRShader"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.8, 0.82, 0.85)
+                float inputs:metallic = 0.9
+                float inputs:roughness = 0.2
+                token outputs:surface
+            }
+        }
+
+        def Material "SyntheticRubber"
+        {
+            token outputs:surface.connect = </World/Materials/SyntheticRubber/PBRShader.outputs:surface>
+
+            def Shader "PBRShader"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.05, 0.05, 0.05)
+                float inputs:metallic = 0
+                float inputs:roughness = 0.85
+                token outputs:surface
+            }
+        }
+
+        def Material "AnodizedBlue"
+        {
+            token outputs:surface.connect = </World/Materials/AnodizedBlue/PBRShader.outputs:surface>
+
+            def Shader "PBRShader"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.05, 0.3, 0.85)
+                float inputs:metallic = 0.7
+                float inputs:roughness = 0.3
+                token outputs:surface
+            }
+        }
+
+        def Material "AlertOrange"
+        {
+            token outputs:surface.connect = </World/Materials/AlertOrange/PBRShader.outputs:surface>
+
+            def Shader "PBRShader"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (1, 0.25, 0)
+                float inputs:metallic = 0.1
+                float inputs:roughness = 0.4
+                token outputs:surface
+            }
+        }
+    }
+
+    def Scope "Lighting"
+    {
+        def DomeLight "DomeLight"
+        {
+            color3f inputs:color = (0.95, 0.95, 1)
+            float inputs:intensity = 1000
+        }
+
+        def RectLight "WorkstationLight"
+        {
+            float inputs:height = 3
+            float inputs:intensity = 25000
+            float inputs:width = 3
+            double3 xformOp:translate = (0, 0, 4)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+    }
+
+    def Cube "FactoryFloor" (
+        prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "MaterialBindingAPI"]
+    )
+    {
+        rel material:binding = </World/Materials/AerospaceAluminum> (
+            bindMaterialAs = "weakerThanDescendants"
+        )
+        double size = 1
+        float3 xformOp:scale = (10, 10, 0.1)
+        double3 xformOp:translate = (0, 0, -0.05)
+        uniform token[] xformOpOrder = ["xformOp:scale", "xformOp:translate"]
+
+        def Material "PhysicsMaterial" (
+            prepend apiSchemas = ["PhysicsMaterialAPI"]
+        )
+        {
+            float physics:dynamicFriction = 0.6
+            float physics:restitution = 0.1
+            float physics:staticFriction = 0.7
+        }
+    }
+
+    def Xform "ConveyorSystem"
+    {
+        def Cube "Frame" (
+            prepend apiSchemas = ["PhysicsCollisionAPI", "MaterialBindingAPI"]
+        )
+        {
+            rel material:binding = </World/Materials/AerospaceAluminum>
+            double size = 1
+            float3 xformOp:scale = (0.8, 4, 0.6)
+            double3 xformOp:translate = (1, 0, 0.3)
+            uniform token[] xformOpOrder = ["xformOp:scale", "xformOp:translate"]
+        }
+
+        def Cube "Belt" (
+            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "MaterialBindingAPI"]
+        )
+        {
+            rel material:binding = </World/Materials/SyntheticRubber> (
+                bindMaterialAs = "weakerThanDescendants"
+            )
+            bool physics:kinematicEnabled = 1
+            double size = 1
+            float3 xformOp:scale = (0.6, 4, 0.05)
+            double3 xformOp:translate = (1, 0, 0.625)
+            uniform token[] xformOpOrder = ["xformOp:scale", "xformOp:translate"]
+
+            def Material "PhysicsMaterial" (
+                prepend apiSchemas = ["PhysicsMaterialAPI"]
+            )
+            {
+                float physics:dynamicFriction = 0.85
+                float physics:restitution = 0
+                float physics:staticFriction = 0.9
+            }
+        }
+    }
+
+    def Xform "RoboticArm" (
+        prepend apiSchemas = ["PhysicsArticulationRootAPI"]
+    )
+    {
+        double3 xformOp:translate = (0, 0, 0)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+
+        def Cylinder "BaseLink" (
+            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "MaterialBindingAPI"]
+        )
+        {
+            double height = 0.4
+            rel material:binding = </World/Materials/AerospaceAluminum>
+            double radius = 0.2
+            double3 xformOp:translate = (0, 0, 0.2)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+
+        def Cylinder "Link1_Arm" (
+            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "MaterialBindingAPI"]
+        )
+        {
+            double height = 0.8
+            rel material:binding = </World/Materials/AerospaceAluminum>
+            double radius = 0.08
+            double3 xformOp:translate = (0, 0, 0.8)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+
+        def PhysicsRevoluteJoint "Joint1_Shoulder" (
+            prepend apiSchemas = ["PhysicsDriveAPI:angular"]
+        )
+        {
+            float drive:angular:physics:damping = 10000
+            float drive:angular:physics:stiffness = 1000000
+            float drive:angular:physics:targetPosition = 0
+            uniform token physics:axis = "Z"
+            rel physics:body0 = </World/RoboticArm/BaseLink>
+            rel physics:body1 = </World/RoboticArm/Link1_Arm>
+            point3f physics:localPos0 = (0, 0, 0.2)
+            point3f physics:localPos1 = (0, 0, -0.4)
+        }
+
+        def Cylinder "Link2_Forearm" (
+            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "MaterialBindingAPI"]
+        )
+        {
+            double height = 0.6
+            rel material:binding = </World/Materials/AerospaceAluminum>
+            double radius = 0.06
+            float3 xformOp:rotateXYZ = (0, 90, 0)
+            double3 xformOp:translate = (0.4, 0, 1.2)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ"]
+        }
+
+        def PhysicsRevoluteJoint "Joint2_Elbow" (
+            prepend apiSchemas = ["PhysicsDriveAPI:angular"]
+        )
+        {
+            float drive:angular:physics:damping = 10000
+            float drive:angular:physics:stiffness = 1000000
+            float drive:angular:physics:targetPosition = 45
+            uniform token physics:axis = "Y"
+            rel physics:body0 = </World/RoboticArm/Link1_Arm>
+            rel physics:body1 = </World/RoboticArm/Link2_Forearm>
+            point3f physics:localPos0 = (0, 0, 0.4)
+            point3f physics:localPos1 = (-0.3, 0, 0)
+        }
+
+        def Cube "EndEffector_Tool" (
+            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsCollisionAPI", "MaterialBindingAPI"]
+        )
+        {
+            rel material:binding = </World/Materials/AerospaceAluminum>
+            double size = 0.12
+            double3 xformOp:translate = (0.7, 0, 1.2)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+
+        def PhysicsPrismaticJoint "Joint3_Gripper" (
+            prepend apiSchemas = ["PhysicsDriveAPI:linear"]
+        )
+        {
+            float drive:linear:physics:damping = 1000
+            float drive:linear:physics:stiffness = 500000
+            float drive:linear:physics:targetPosition = 0.05
+            uniform token physics:axis = "X"
+            rel physics:body0 = </World/RoboticArm/Link2_Forearm>
+            rel physics:body1 = </World/RoboticArm/EndEffector_Tool>
+            point3f physics:localPos0 = (0.3, 0, 0)
+            point3f physics:localPos1 = (-0.06, 0, 0)
+            float physics:lowerLimit = 0
+            float physics:upperLimit = 0.2
+        }
+    }
+
+    def "Sensors"
+    {
+        def Cube "OpticalTrigger" (
+            prepend apiSchemas = ["PhysicsCollisionAPI"]
+        )
+        {
+            double size = 1
+            token visibility = "invisible"
+            float3 xformOp:scale = (0.8, 0.2, 0.4)
+            double3 xformOp:translate = (1, 0, 0.85)
+            uniform token[] xformOpOrder = ["xformOp:scale", "xformOp:translate"]
+        }
+    }
+
+    def Camera "Camera_Inspection"
+    {
+        float focalLength = 35
+        float3 xformOp:rotateXYZ = (55, 0, 135)
+        double3 xformOp:translate = (2.5, 2.5, 2.5)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ"]
+    }
+
+    def "DynamicPayloads"
+    {
+        def Cube "Payload_Blue" (
+            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI", "PhysicsCollisionAPI", "MaterialBindingAPI"]
+        )
+        {
+            rel material:binding = </World/Materials/AnodizedBlue> (
+                bindMaterialAs = "weakerThanDescendants"
+            )
+            float physics:mass = 0.5
+            double size = 0.15
+            double3 xformOp:translate = (1, -1.5, 0.8)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+
+            def Material "PhysicsMaterial" (
+                prepend apiSchemas = ["PhysicsMaterialAPI"]
+            )
+            {
+                float physics:dynamicFriction = 0.5
+                float physics:restitution = 0.1
+                float physics:staticFriction = 0.6
+            }
+        }
+
+        def Cube "Payload_Orange" (
+            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI", "PhysicsCollisionAPI", "MaterialBindingAPI"]
+        )
+        {
+            rel material:binding = </World/Materials/AlertOrange> (
+                bindMaterialAs = "weakerThanDescendants"
+            )
+            float physics:mass = 0.5
+            double size = 0.15
+            double3 xformOp:translate = (1, -0.8, 0.8)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+
+            def Material "PhysicsMaterial" (
+                prepend apiSchemas = ["PhysicsMaterialAPI"]
+            )
+            {
+                float physics:dynamicFriction = 0.5
+                float physics:restitution = 0.1
+                float physics:staticFriction = 0.6
+            }
+        }
+    }
+}
+
