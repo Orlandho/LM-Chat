@@ -15,7 +15,6 @@ class AsyncTestCase(unittest.IsolatedAsyncioTestCase):
     def _setupAsync(self):
         super()._setupAsync()
         if asyncio.iscoroutinefunction(getattr(self, 'setUp', None)):
-            # Cierre preventivo de corrutina si no se usa
             res = self.setUp()
             if asyncio.iscoroutine(res):
                 res.close()
@@ -138,4 +137,16 @@ def mock_find(path: str):
 
 sys.modules['omni.kit.ui_test'].find = mock_find
 
-print("[Jules Test Framework] Módulos de Omniverse y OpenUSD interceptados y emulados exitosamente.")
+# Mocks para MCP y Execution Sandbox
+class MCPClientMock(MagicMock):
+    async def call_tool(self, server, tool, args):
+        return {"status": "success", "data": "mocked_data"}
+
+class ExecutionSandboxMock(MagicMock):
+    def execute_code(self, code_string):
+        return {"success": True, "output": "Execution mocked"}
+
+sys.modules['mcp_client'] = MCPClientMock()
+sys.modules['execution_sandbox'] = ExecutionSandboxMock()
+
+print("[Jules Test Framework] Módulos de Omniverse, MCP y Sandbox aislados y emulados exitosamente.")
