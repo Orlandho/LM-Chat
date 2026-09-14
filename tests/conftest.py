@@ -1,5 +1,11 @@
 import sys
+import os
 from unittest.mock import MagicMock
+
+# Asegurar que la raíz del proyecto esté en sys.path para pytest en CI/CD
+repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if repo_root not in sys.path:
+    sys.path.insert(0, repo_root)
 
 # Mocks Avanzados para Tests Unitarios Aislados (Swarm / Jules Concurrente)
 # Cada mock expone un comportamiento específico para evitar colisiones entre issues paralelos.

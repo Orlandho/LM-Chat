@@ -3,5 +3,8 @@
 
 try:
     from .extension import *
-except ModuleNotFoundError:
-    pass
+except (ImportError, ModuleNotFoundError):
+    try:
+        from extension import *
+    except (ImportError, ModuleNotFoundError):
+        pass
