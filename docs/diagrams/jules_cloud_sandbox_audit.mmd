@@ -1,0 +1,54 @@
+flowchart TD
+    classDef client fill:#E8F4FD,stroke:#0D6EFD,stroke-width:2px,color:#1A1A1A;
+    classDef ghActions fill:#E8F5E9,stroke:#28A745,stroke-width:2px,color:#1A1A1A;
+    classDef julesCloud fill:#F3E8FD,stroke:#6F42C1,stroke-width:2px,color:#1A1A1A;
+    classDef blocked fill:#FCE8E6,stroke:#DC3545,stroke-width:2px,color:#721C24;
+    classDef success fill:#D4EDDA,stroke:#28A745,stroke-width:2px,color:#155724;
+
+    subgraph DevWork ["Flujo de Contribución"]
+        PR["Pull Request hacia 'main'\n(feat/ / fix/ / jules/)"]:::client
+    end
+
+    subgraph Capa1CI ["Capa 1: CI Rápido y Determinista (GitHub Actions - 15s)"]
+        direction TB
+        PyTest["Validación de Suite de Pruebas\n(pytest tests/ -v con Mocks Omniverse)"]:::ghActions
+    end
+
+    subgraph Capa2Jules ["Capa 2: Auditoría en Sandbox Virtual de Jules (jules.google.com)"]
+        direction TB
+        Dispatcher["Workflow Despachador (.github/workflows/jules-sandbox-audit.yml)\nCrea Issue con etiqueta 'jules' y metadatos estructurados"]:::julesCloud
+        StatusPending["Marca Status Check:\n'Veredicto de Auditoría en Sandbox de Jules' -> PENDING"]:::julesCloud
+        
+        GHApp["GitHub App de Google Jules\n(Detecta evento en Orlandho/LM-Chat)"]:::julesCloud
+        JulesVM["Sesión en la Nube (jules.google.com/session)\nClona repo, valida OpenUSD, 60 FPS Async y MCP"]:::julesCloud
+        JulesVerdict["Jules emite comentario:\nVEREDICTO: APROBADO o RECHAZADO"]:::julesCloud
+
+        Dispatcher --> StatusPending
+        Dispatcher --> GHApp
+        GHApp --> JulesVM
+        JulesVM --> JulesVerdict
+    end
+
+    subgraph ResolucionVeredicto ["Resolución y Monitoreo"]
+        direction TB
+        Listener["Workflow Listener / Watchdog\n(Captura respuesta en Issue)"]:::client
+        UpdateSuccess["Status Check -> SUCCESS"]:::success
+        UpdateFail["Status Check -> FAILURE"]:::blocked
+
+        JulesVerdict --> Listener
+        Listener -- "Si Aprobado" --> UpdateSuccess
+        Listener -- "Si Rechazado / Fallos" --> UpdateFail
+    end
+
+    subgraph RulesetProtection ["Protección Estricta de Rama (Ruleset #16053736)"]
+        CheckEvaluation{"¿Los checks de pytest y\nel Veredicto de Jules están en verde?"}:::client
+        MergeAllowed["FUSIÓN PERMITIDA (Squash Merge)"]:::success
+        MergeBlocked["FUSIÓN BLOQUEADA (HTTP 405 Method Not Allowed)"]:::blocked
+
+        CheckEvaluation -- "Sí" --> MergeAllowed
+        CheckEvaluation -- "No" --> MergeBlocked
+    end
+
+    PR --> PyTest
+    PR --> Dispatcher
+    PyTest & UpdateSuccess & UpdateFail --> CheckEvaluation
