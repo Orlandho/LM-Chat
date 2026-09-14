@@ -14,6 +14,15 @@ class OmniUIMock(MagicMock):
         self.HStack = MagicMock
         self.Button = MagicMock
         self.Label = MagicMock
+        self.ComboBox = MagicMock
+        self.ScrollingFrame = MagicMock
+        self.StringField = MagicMock
+        self.Rectangle = MagicMock
+        self.ZStack = MagicMock
+        self.Spacer = MagicMock
+        self.Alignment = MagicMock
+        self.ScrollBarPolicy = MagicMock
+        self.DockPreference = MagicMock
 
 class UsdContextMock(MagicMock):
     """Mock especializado para pxr.Usd y omni.usd (Contexto USD)."""
@@ -37,13 +46,19 @@ class ExecutionSandboxMock(MagicMock):
 # Inyección de módulos simulados al sistema
 sys.modules['omni'] = MagicMock()
 sys.modules['omni.ext'] = MagicMock()
+sys.modules['omni.appwindow'] = MagicMock()
 sys.modules['omni.ui'] = OmniUIMock()
 sys.modules['omni.usd'] = UsdContextMock()
 sys.modules['omni.kit'] = MagicMock()
+sys.modules['omni.kit.test'] = MagicMock()
+sys.modules['omni.kit.ui_test'] = MagicMock()
 
 sys.modules['pxr'] = MagicMock()
 sys.modules['pxr.Usd'] = UsdContextMock()
 sys.modules['pxr.UsdGeom'] = MagicMock()
+
+sys.modules['orlandoexplorer'] = MagicMock()
+sys.modules['orlandoexplorer.ia_test'] = MagicMock()
 
 sys.modules['mcp_client'] = MCPClientMock()
 sys.modules['execution_sandbox'] = ExecutionSandboxMock()
