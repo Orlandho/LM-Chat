@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 """
-Contratos e interfaces fundamentales del OmniAgent Harness.
+Contratos e interfaces fundamentales de la suite LM-Chat™.
 Diseñados para permitir el desarrollo concurrente y desacoplado por el Enjambre de Jules.
 """
 

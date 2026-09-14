@@ -20,6 +20,7 @@ import omni.kit.ui_test as ui_test
 
 # Import extension python module we are testing with absolute import path,
 # as if we are external user (other extension)
+import omni.lm_chat
 import orlandoexplorer.ia_test
 
 
@@ -36,8 +37,10 @@ class Test(omni.kit.test.AsyncTestCase):
 
     # Actual test, notice it is an "async" function, so "await" can be used if needed
     async def test_hello_public_function(self):
-        result = orlandoexplorer.ia_test.some_public_function(4)
-        self.assertEqual(result, 256)
+        result_lm = omni.lm_chat.some_public_function(4)
+        self.assertEqual(result_lm, 256)
+        result_legacy = orlandoexplorer.ia_test.some_public_function(4)
+        self.assertEqual(result_legacy, 256)
 
     async def test_window_button(self):
         # Find a label in our window

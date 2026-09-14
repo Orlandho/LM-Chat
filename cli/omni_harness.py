@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 """
-OmniAgent CLI Harness for Enterprise & Advanced Users.
+LM-Chat™ CLI Harness for Enterprise & Advanced Users.
 
 Provides an interactive REPL terminal interface and direct prompt execution tool
 for testing, evaluating, and interacting with LLM providers (LM Studio, Ollama, vLLM, Cloud).
@@ -29,13 +29,13 @@ from logic.inference_router import InferenceRouter
 
 BANNER = r"""
 ===================================================================
-   ___                  _   _                      _
-  / _ \ _ __ ___  _ __ (_) /_\   __ _  ___ _ __ | |_
- / /_\ \ '_ ` _ \| '_ \| |//_\\ / _` |/ _ \ '_ \| __|
-/ /_\\ \ | | | | | | | | /  _  \ (_| |  __/ | | | |_
-\____/|_| |_| |_|_| |_|_\_/ \_/\__, |\___|_| |_|\__|
-                               |___/
-  OmniAgent Enterprise CLI Harness - NVIDIA Omniverse Agentic Suite
+    __    __  ___        ________          __ 
+   / /   /  |/  /       / ____/ /_  ____ _/ /_
+  / /   / /|_/ /  ____ / /   / __ \/ __ `/ __/
+ / /___/ /  / /  /___// /___/ / / / /_/ / /_  
+/_____/_/  /_/        \____/_/ /_/\__,_/\__/  
+                                              
+   LM-Chat™ Enterprise CLI Harness - NVIDIA Omniverse Agentic Suite
 ===================================================================
 """
 
@@ -48,7 +48,7 @@ def parse_arguments() -> argparse.Namespace:
         argparse.Namespace: Parsed command-line arguments.
     """
     parser = argparse.ArgumentParser(
-        description="OmniAgent Enterprise CLI Harness - Multi-Provider LLM Interactive Console"
+        description="LM-Chat™ Enterprise CLI Harness - Multi-Provider LLM Interactive Console"
     )
     parser.add_argument(
         "-p",
@@ -102,8 +102,8 @@ def parse_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
-class OmniCLI:
-    """CLI Harness Session Manager."""
+class LMChatCLI:
+    """LM-Chat CLI Harness Session Manager."""
 
     def __init__(self, router: InferenceRouter, system_prompt: str) -> None:
         """
@@ -200,7 +200,7 @@ class OmniCLI:
                     arg = cmd_parts[1].strip() if len(cmd_parts) > 1 else ""
 
                     if command in ["/exit", "/quit"]:
-                        print("\n¡Hasta luego! Cerrando sesión OmniAgent CLI.\n")
+                        print("\n¡Hasta luego! Cerrando sesión LM-Chat CLI.\n")
                         break
                     elif command == "/help":
                         print("\nComandos Disponibles:")
@@ -249,6 +249,10 @@ class OmniCLI:
                 break
 
 
+# Backward compatibility alias
+OmniCLI = LMChatCLI
+
+
 async def main() -> None:
     """Main CLI entrypoint."""
     args = parse_arguments()
@@ -261,7 +265,7 @@ async def main() -> None:
         timeout=args.timeout,
     )
 
-    cli = OmniCLI(router=router, system_prompt=args.system_prompt)
+    cli = LMChatCLI(router=router, system_prompt=args.system_prompt)
 
     if args.prompt:
         # Direct execution mode

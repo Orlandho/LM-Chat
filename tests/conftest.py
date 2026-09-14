@@ -88,7 +88,7 @@ base_modules = [
     'omni', 'omni.ext', 'omni.ui', 'omni.usd', 'omni.kit',
     'omni.kit.test', 'omni.kit.ui_test', 'omni.appwindow',
     'pxr', 'pxr.Usd', 'pxr.UsdGeom', 'pxr.Gf', 'pxr.Sdf',
-    'orlandoexplorer', 'orlandoexplorer.ia_test'
+    'omni.lm_chat', 'orlandoexplorer', 'orlandoexplorer.ia_test'
 ]
 
 for mod_name in base_modules:
@@ -106,7 +106,10 @@ for mod_name in base_modules:
         if parent_name in sys.modules:
             setattr(sys.modules[parent_name], child_name, sys.modules[mod_name])
 
-# Configurar funciones mock específicas para test_hello_world
+# Configurar funciones mock específicas para omni.lm_chat y retrocompatibilidad con test_hello_world
+lm_chat_mod = sys.modules['omni.lm_chat']
+lm_chat_mod.some_public_function = lambda x: x ** 4
+
 ia_test_mod = sys.modules['orlandoexplorer.ia_test']
 ia_test_mod.some_public_function = lambda x: x ** 4
 
