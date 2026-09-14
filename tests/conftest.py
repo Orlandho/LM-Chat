@@ -1,12 +1,18 @@
 # -*- coding: utf-8 -*-
 import sys
+import os
 import asyncio
 import unittest
 from types import ModuleType
 from unittest.mock import MagicMock, AsyncMock
 
+# Asegurar que la raíz del proyecto esté en sys.path para pytest y unittest en CI/CD y local
+repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if repo_root not in sys.path:
+    sys.path.insert(0, repo_root)
+
 # Mocks para evadir los requisitos de ejecución nativa de Omniverse Kit.
-# Permite que Jules pueda ejecutar pytest en cualquier entorno (CI/CD o local) sin lanzar el software 3D.
+# Permite que Jules y los desarrolladores puedan ejecutar pytest en cualquier entorno sin lanzar el software 3D.
 
 class AsyncTestCase(unittest.IsolatedAsyncioTestCase):
     """Clase base emulada para tests asíncronos de Omniverse."""
