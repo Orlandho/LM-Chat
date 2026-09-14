@@ -23,3 +23,29 @@ y este proyecto se adhiere a [Semantic Versioning (SemVer 2.0.0)](https://semver
 - Soporte para codificación UTF-8 en terminales de Windows 11 sin errores por emojis o caracteres multilingües.
 - Corrección de la aplicación de masa dinámica en PhysX (`UsdPhysics.MassAPI`).
 - Mocks aislados de Omniverse para ejecución multiplataforma sin depender del entorno 3D abierto.
+
+## v1.1.0 (2026-09-14)
+
+### Feat
+
+- **versioning**: install professional automated SemVer release pipeline (#47)
+- **branding**: standardize commercial trademark LM-Chat and omni.lm_chat extension ID (#46)
+- **demo**: add autonomous industrial robotics manufacturing cell script (#45)
+- **usd_context**: implement StageContextSerializer for OpenUSD JSON spatial context (#43)
+- **mcp**: implement Omniverse MCP Client Registry (#42)
+- **ui**: implement primary native omni.ui chat GUI and MDV architecture (#41)
+- implement asynchronous multi-provider InferenceRouter and CLI Harness (#36)
+- **core**: introduce interface contracts for parallel Jules swarm execution (#37)
+- **infra**: add AGENTS.md, Jules CI suite with Omniverse mocks, and architecture diagram (#34)
+
+### Fix
+
+- **test**: eliminate race conditions and 10s artificial sleep in MCP tests (#49)
+- **cli**: enforce UTF-8 stream encoding for Windows consoles (#44)
+
+## v0.0.37 (2026-05-08)
+
+### Feat
+
+- implement self-healing loop for AI code generation in omniverse extension
+- Implement Omniverse Spatial Agent logic

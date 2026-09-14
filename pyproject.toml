@@ -1,6 +1,6 @@
 [project]
 name = "omni-lm-chat"
-version = "1.0.0"
+version = "1.1.0"
 description = "LM-Chat™: Autonomous Spatial AI Assistant & Neural Copilot for NVIDIA Omniverse"
 readme = "README.md"
 requires-python = ">=3.10"
