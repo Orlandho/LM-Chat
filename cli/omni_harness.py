@@ -13,6 +13,14 @@ import argparse
 import asyncio
 from typing import List, Dict, Optional
 
+# Ensure UTF-8 output encoding in Windows terminals for emojis and Unicode characters
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 # Ensure project root is in sys.path when running cli/omni_harness.py directly
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
