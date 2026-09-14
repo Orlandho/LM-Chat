@@ -16,21 +16,17 @@ from core.interfaces import IMCPClientRegistry
 
 
 class MockStreamReader:
-    """Mock para asyncio.StreamReader que entrega líneas JSON-RPC preconfiguradas."""
+    """Mock para asyncio.StreamReader que entrega líneas JSON-RPC preconfiguradas con latencia cero."""
 
     def __init__(self):
-        self._lines = []
+        self._queue = asyncio.Queue()
 
     def add_line(self, line_dict: dict):
         line_bytes = (json.dumps(line_dict) + "\n").encode("utf-8")
-        self._lines.append(line_bytes)
+        self._queue.put_nowait(line_bytes)
 
     async def readline(self):
-        if self._lines:
-            return self._lines.pop(0)
-        # Espera indeterminada simulando EOF o stream abierto
-        await asyncio.sleep(10)
-        return b""
+        return await self._queue.get()
 
 
 class MockStreamWriter:
@@ -46,9 +42,8 @@ class MockStreamWriter:
         pass
 
 
-@pytest.fixture
-def mock_subprocess():
-    """Fixture que reemplaza asyncio.create_subprocess_exec con un proceso simulado interactivo."""
+def make_mock_process():
+    """Crea una instancia de proceso simulado interactivo con sus propios streams independientes."""
     mock_process = AsyncMock()
     mock_process.returncode = None
     mock_process.stdin = MockStreamWriter()
@@ -57,6 +52,13 @@ def mock_subprocess():
     mock_process.wait = AsyncMock(return_value=0)
     mock_process.terminate = MagicMock()
     mock_process.kill = MagicMock()
+    return mock_process
+
+
+@pytest.fixture
+def mock_subprocess():
+    """Fixture que reemplaza asyncio.create_subprocess_exec con un proceso simulado interactivo."""
+    mock_process = make_mock_process()
 
     with patch("asyncio.create_subprocess_exec", return_value=mock_process) as mock_exec:
         yield mock_exec, mock_process
@@ -248,14 +250,17 @@ async def test_call_tool_server_error(mock_subprocess):
 
 @pytest.mark.asyncio
 async def test_stop_server_and_close(mock_subprocess):
-    """Prueba la detención individual y masiva de servidores."""
-    _, mock_proc = mock_subprocess
+    """Prueba la detención individual y masiva de servidores con procesos mock independientes."""
+    mock_exec, _ = mock_subprocess
+    proc1 = make_mock_process()
+    proc2 = make_mock_process()
+    mock_exec.side_effect = [proc1, proc2]
     registry = OmniMCPRegistry()
 
-    mock_proc.stdout.add_line({"jsonrpc": "2.0", "id": 1, "result": {}})
+    proc1.stdout.add_line({"jsonrpc": "2.0", "id": 1, "result": {}})
     await registry.register_server("server1", "python", ["s1.py"])
 
-    mock_proc.stdout.add_line({"jsonrpc": "2.0", "id": 1, "result": {}})
+    proc2.stdout.add_line({"jsonrpc": "2.0", "id": 1, "result": {}})
     await registry.register_server("server2", "python", ["s2.py"])
 
     assert len(registry.servers) == 2

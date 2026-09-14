@@ -39,6 +39,7 @@ class MCPServerConnection:
         self.process: Optional[asyncio.subprocess.Process] = None
         self._request_id: int = 0
         self._pending_requests: Dict[int, asyncio.Future] = {}
+        self._early_responses: Dict[int, Any] = {}
         self._reader_task: Optional[asyncio.Task] = None
         self._is_initialized: bool = False
 
@@ -127,6 +128,12 @@ class MCPServerConnection:
         future: asyncio.Future = loop.create_future()
         self._pending_requests[req_id] = future
 
+        # Si ya arribó una respuesta temprana para este ID, resolver de inmediato
+        if req_id in self._early_responses:
+            future.set_result(self._early_responses.pop(req_id))
+            self._pending_requests.pop(req_id, None)
+            return await future
+
         message = json.dumps(payload) + "\n"
         self.process.stdin.write(message.encode("utf-8"))
         await self.process.stdin.drain()
@@ -178,10 +185,14 @@ class MCPServerConnection:
                 data = json.loads(line_str)
                 req_id = data.get("id")
 
-                if req_id is not None and req_id in self._pending_requests:
-                    future = self._pending_requests[req_id]
-                    if not future.done():
-                        future.set_result(data)
+                if req_id is not None:
+                    if req_id in self._pending_requests:
+                        future = self._pending_requests[req_id]
+                        if not future.done():
+                            future.set_result(data)
+                    else:
+                        # Almacenar en buffer de respuestas tempranas evitando pérdidas por condiciones de carrera
+                        self._early_responses[req_id] = data
 
             except asyncio.CancelledError:
                 break
@@ -197,6 +208,9 @@ class MCPServerConnection:
         """
         Detiene el subproceso y libera recursos.
         """
+        self._pending_requests.clear()
+        self._early_responses.clear()
+
         if self._reader_task and not self._reader_task.done():
             self._reader_task.cancel()
 
