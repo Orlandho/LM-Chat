@@ -37,7 +37,7 @@ jobs:
 
       - name: Despachar Sesión a Google Jules y Ejecutar Watchdog de Veredicto
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.JULES_DISPATCH_TOKEN || secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_API_URL: ${{ github.api_url }}
           WATCHDOG_TIMEOUT_MINUTES: 10
