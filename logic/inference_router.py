@@ -76,9 +76,12 @@ class InferenceRouter:
         provider_clean = provider.lower().strip()
         self._provider = provider_clean
 
-        # Resolve base URL
+        # Resolve and validate base URL
         if base_url:
-            self._base_url = base_url.rstrip("/")
+            cleaned_url = base_url.strip().replace("\r", "").replace("\n", "").rstrip("/")
+            if not (cleaned_url.startswith("http://") or cleaned_url.startswith("https://")):
+                raise ValueError(f"Invalid base_url scheme: '{base_url}'. Must start with http:// or https://")
+            self._base_url = cleaned_url
         else:
             self._base_url = self.DEFAULT_ENDPOINTS.get(
                 provider_clean, "http://localhost:1234/v1"
@@ -90,7 +93,11 @@ class InferenceRouter:
         else:
             self._model = self.DEFAULT_MODELS.get(provider_clean, "local-model")
 
-        self._api_key = api_key
+        # Sanitize API key to prevent CRLF HTTP header injection
+        if api_key:
+            self._api_key = api_key.strip().replace("\r", "").replace("\n", "")
+        else:
+            self._api_key = None
 
     @property
     def provider(self) -> str:
