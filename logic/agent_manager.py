@@ -13,6 +13,9 @@ from typing import Optional, Callable, Dict, Any, List
 from .inference_router import InferenceRouter
 from .usd_controller import USDController
 
+# Pre-compiled regular expression pattern for Python code block extraction
+_PYTHON_CODE_PATTERN = re.compile(r"```python\s*(.*?)\s*```", re.DOTALL)
+
 
 class AgentManager:
     """Orchestrates conversations, provider routing, and ReAct Reflection Loop logic."""
@@ -137,8 +140,8 @@ class AgentManager:
                 # Wait briefly for UI refresh
                 await asyncio.sleep(0.1)
 
-                # Check for python code to execute
-                match = re.search(r"```python\s*(.*?)\s*```", full_content, re.DOTALL)
+                # Check for python code to execute using pre-compiled regex
+                match = _PYTHON_CODE_PATTERN.search(full_content)
                 if match:
                     extracted_code = match.group(1).strip()
                     exec_result = self._usd_controller.execute_code(extracted_code)
