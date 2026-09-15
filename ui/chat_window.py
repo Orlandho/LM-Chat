@@ -15,6 +15,9 @@ import omni.appwindow
 from core.interfaces import IChatView
 from ui.models import ChatModel
 
+# Pre-compiled regular expression pattern for Markdown code block parsing
+_MARKDOWN_CODE_PATTERN = re.compile(r"```(\w*)\n?(.*?)```", re.DOTALL)
+
 
 class ChatDelegate:
     """Delegado para interceptar eventos y desacoplar la vista del modelo (MDV Architecture)."""
@@ -293,10 +296,10 @@ class ChatWindow(IChatView):
             List[Tuple[str, str]]: Lista de tuplas `(tipo, contenido)` donde tipo es 'text' o 'code'.
         """
         blocks: List[Tuple[str, str]] = []
-        pattern = re.compile(r"```(\w*)\n?(.*?)```", re.DOTALL)
         last_end = 0
 
-        for match in pattern.finditer(text):
+        # Optimization: Use pre-compiled module-level regex pattern
+        for match in _MARKDOWN_CODE_PATTERN.finditer(text):
             start, end = match.span()
             if start > last_end:
                 plain_text = text[last_end:start]
