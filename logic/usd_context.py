@@ -23,6 +23,20 @@ def _is_mock(obj: Any) -> bool:
 class StageContextSerializer(IStageContextSerializer):
     """Serializes the active OpenUSD stage into JSON context and extracts detailed prim summaries."""
 
+    # Pre-allocated target USD attributes tuple to prevent list allocations per prim traversal
+    TARGET_KEYS = (
+        "xformOp:translate",
+        "xformOp:rotateXYZ",
+        "xformOp:scale",
+        "displayColor",
+        "primvars:displayColor",
+        "radius",
+        "height",
+        "size",
+        "intensity",
+        "color",
+    )
+
     def get_stage_context_as_json(self, max_depth: int = 4) -> str:
         """
         Traverses active USD stage hierarchy up to max_depth and returns a JSON string.
@@ -56,12 +70,14 @@ class StageContextSerializer(IStageContextSerializer):
                     if not prim.IsValid():
                         continue
 
-                path_str = str(prim.GetPath())
-                if _is_mock(prim.GetPath()):
+                # Cache path object reference to avoid redundant GetPath calls
+                path_obj = prim.GetPath()
+                if _is_mock(path_obj):
                     continue
 
-                path_elements = [p for p in path_str.strip("/").split("/") if p]
-                depth = len(path_elements)
+                path_str = str(path_obj)
+                # Optimize depth calculation: O(1) string slash count instead of memory-allocating list split
+                depth = path_str.count("/") if path_str != "/" else 0
 
                 if depth > max_depth:
                     continue
@@ -172,27 +188,18 @@ class StageContextSerializer(IStageContextSerializer):
     def _extract_attributes_sample(self, prim: Any) -> Dict[str, Any]:
         """Extracts key attribute samples from a USD prim."""
         sample: Dict[str, Any] = {}
-        target_keys = [
-            "xformOp:translate",
-            "xformOp:rotateXYZ",
-            "xformOp:scale",
-            "displayColor",
-            "primvars:displayColor",
-            "radius",
-            "height",
-            "size",
-            "intensity",
-            "color",
-        ]
+        # Fetch GetAttribute callable once per prim to eliminate repeated hasattr/getattr lookups in loop
+        get_attr = getattr(prim, "GetAttribute", None)
+        if not callable(get_attr):
+            return sample
 
         try:
-            for key in target_keys:
-                if hasattr(prim, "GetAttribute"):
-                    attr = prim.GetAttribute(key)
-                    if attr and hasattr(attr, "Get"):
-                        val = attr.Get()
-                        if val is not None and not _is_mock(val):
-                            sample[key] = self._to_json_serializable(val)
+            for key in self.TARGET_KEYS:
+                attr = get_attr(key)
+                if attr and hasattr(attr, "Get"):
+                    val = attr.Get()
+                    if val is not None and not _is_mock(val):
+                        sample[key] = self._to_json_serializable(val)
         except Exception:
             pass
 
