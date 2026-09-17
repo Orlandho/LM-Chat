@@ -76,9 +76,14 @@ class InferenceRouter:
         provider_clean = provider.lower().strip()
         self._provider = provider_clean
 
-        # Resolve base URL
+        # Resolve base URL with security validation (prevent SSRF and LFI via arbitrary schemes)
         if base_url:
-            self._base_url = base_url.rstrip("/")
+            cleaned_url = base_url.rstrip("/")
+            if not (cleaned_url.startswith("http://") or cleaned_url.startswith("https://")):
+                raise ValueError(
+                    f"Insecure URL scheme in base_url '{base_url}'. Only 'http://' and 'https://' are permitted."
+                )
+            self._base_url = cleaned_url
         else:
             self._base_url = self.DEFAULT_ENDPOINTS.get(
                 provider_clean, "http://localhost:1234/v1"

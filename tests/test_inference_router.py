@@ -81,6 +81,15 @@ class TestInferenceRouter(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(router.base_url, "http://localhost:11434/v1")
         self.assertEqual(router.model, "qwen2.5-coder")
 
+    def test_set_provider_invalid_url_scheme(self):
+        """Test that non-HTTP/HTTPS base URLs are rejected for security (SSRF/LFI prevention)."""
+        with self.assertRaises(ValueError):
+            InferenceRouter(provider="cloud", base_url="file:///etc/passwd")
+
+        router = InferenceRouter(provider="lm_studio")
+        with self.assertRaises(ValueError):
+            router.set_provider("cloud", base_url="ftp://malicious.host/v1")
+
     @patch("aiohttp.ClientSession.post")
     async def test_chat_completions_success(self, mock_post):
         """Test successful non-streaming chat completion request."""
