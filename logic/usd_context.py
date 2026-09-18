@@ -14,6 +14,20 @@ from core.interfaces import IStageContextSerializer
 
 logger = logging.getLogger(__name__)
 
+# Pre-allocated tuple of target attribute keys to avoid list creation per prim
+TARGET_ATTRIBUTE_KEYS = (
+    "xformOp:translate",
+    "xformOp:rotateXYZ",
+    "xformOp:scale",
+    "displayColor",
+    "primvars:displayColor",
+    "radius",
+    "height",
+    "size",
+    "intensity",
+    "color",
+)
+
 
 def _is_mock(obj: Any) -> bool:
     """Helper to check if an object is a Mock/MagicMock instance from unittest.mock."""
@@ -56,12 +70,13 @@ class StageContextSerializer(IStageContextSerializer):
                     if not prim.IsValid():
                         continue
 
-                path_str = str(prim.GetPath())
-                if _is_mock(prim.GetPath()):
+                prim_path = prim.GetPath()
+                if _is_mock(prim_path):
                     continue
 
-                path_elements = [p for p in path_str.strip("/").split("/") if p]
-                depth = len(path_elements)
+                path_str = str(prim_path)
+                # Performance optimization: str.count('/') avoids string split and list allocations
+                depth = path_str.count("/") if path_str and path_str != "/" else 0
 
                 if depth > max_depth:
                     continue
@@ -172,21 +187,9 @@ class StageContextSerializer(IStageContextSerializer):
     def _extract_attributes_sample(self, prim: Any) -> Dict[str, Any]:
         """Extracts key attribute samples from a USD prim."""
         sample: Dict[str, Any] = {}
-        target_keys = [
-            "xformOp:translate",
-            "xformOp:rotateXYZ",
-            "xformOp:scale",
-            "displayColor",
-            "primvars:displayColor",
-            "radius",
-            "height",
-            "size",
-            "intensity",
-            "color",
-        ]
 
         try:
-            for key in target_keys:
+            for key in TARGET_ATTRIBUTE_KEYS:
                 if hasattr(prim, "GetAttribute"):
                     attr = prim.GetAttribute(key)
                     if attr and hasattr(attr, "Get"):
