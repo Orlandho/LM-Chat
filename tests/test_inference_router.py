@@ -81,6 +81,24 @@ class TestInferenceRouter(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(router.base_url, "http://localhost:11434/v1")
         self.assertEqual(router.model, "qwen2.5-coder")
 
+    def test_api_key_crlf_sanitization(self):
+        """Security Test: Verify API key CRLF characters are stripped to prevent header injection."""
+        router = InferenceRouter(provider="cloud", api_key="sk-secret-123\r\nX-Injected-Header: bad\n")
+        self.assertEqual(router.api_key, "sk-secret-123X-Injected-Header: bad")
+        headers = router.get_headers()
+        self.assertNotIn("\r", headers["Authorization"])
+        self.assertNotIn("\n", headers["Authorization"])
+
+    def test_repr_masks_api_key(self):
+        """Security Test: Verify string representation masks API key secrets."""
+        router = InferenceRouter(provider="cloud", api_key="sk-secret-key-99999")
+        repr_str = repr(router)
+        self.assertNotIn("sk-secret-key-99999", repr_str)
+        self.assertIn("api_key='***'", repr_str)
+
+        router_no_key = InferenceRouter(provider="lm_studio")
+        self.assertIn("api_key='None'", repr(router_no_key))
+
     @patch("aiohttp.ClientSession.post")
     async def test_chat_completions_success(self, mock_post):
         """Test successful non-streaming chat completion request."""

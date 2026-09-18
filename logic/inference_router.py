@@ -90,7 +90,21 @@ class InferenceRouter:
         else:
             self._model = self.DEFAULT_MODELS.get(provider_clean, "local-model")
 
-        self._api_key = api_key
+        # Sanitize API key to prevent HTTP header / CRLF injection
+        if api_key:
+            clean_key = api_key.strip().replace("\r", "").replace("\n", "")
+            self._api_key = clean_key if clean_key else None
+        else:
+            self._api_key = None
+
+    def __repr__(self) -> str:
+        """Returns safe string representation with masked API key to prevent log leakage."""
+        masked_key = "***" if self._api_key else "None"
+        return (
+            f"InferenceRouter(provider={self._provider!r}, "
+            f"model={self._model!r}, base_url={self._base_url!r}, "
+            f"api_key={masked_key!r})"
+        )
 
     @property
     def provider(self) -> str:
