@@ -20,6 +20,21 @@ def _is_mock(obj: Any) -> bool:
     return getattr(type(obj), "__module__", "").startswith("unittest.mock")
 
 
+# Constant tuple for attribute extraction to avoid re-allocation during stage traversal loops
+_TARGET_ATTRIBUTE_KEYS = (
+    "xformOp:translate",
+    "xformOp:rotateXYZ",
+    "xformOp:scale",
+    "displayColor",
+    "primvars:displayColor",
+    "radius",
+    "height",
+    "size",
+    "intensity",
+    "color",
+)
+
+
 class StageContextSerializer(IStageContextSerializer):
     """Serializes the active OpenUSD stage into JSON context and extracts detailed prim summaries."""
 
@@ -60,8 +75,8 @@ class StageContextSerializer(IStageContextSerializer):
                 if _is_mock(prim.GetPath()):
                     continue
 
-                path_elements = [p for p in path_str.strip("/").split("/") if p]
-                depth = len(path_elements)
+                # Fast path depth evaluation: SdfPath.count('/') avoids list allocation per prim
+                depth = path_str.count("/") if path_str else 0
 
                 if depth > max_depth:
                     continue
@@ -172,21 +187,9 @@ class StageContextSerializer(IStageContextSerializer):
     def _extract_attributes_sample(self, prim: Any) -> Dict[str, Any]:
         """Extracts key attribute samples from a USD prim."""
         sample: Dict[str, Any] = {}
-        target_keys = [
-            "xformOp:translate",
-            "xformOp:rotateXYZ",
-            "xformOp:scale",
-            "displayColor",
-            "primvars:displayColor",
-            "radius",
-            "height",
-            "size",
-            "intensity",
-            "color",
-        ]
 
         try:
-            for key in target_keys:
+            for key in _TARGET_ATTRIBUTE_KEYS:
                 if hasattr(prim, "GetAttribute"):
                     attr = prim.GetAttribute(key)
                     if attr and hasattr(attr, "Get"):
