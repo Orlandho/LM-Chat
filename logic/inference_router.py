@@ -78,7 +78,13 @@ class InferenceRouter:
 
         # Resolve base URL
         if base_url:
-            self._base_url = base_url.rstrip("/")
+            cleaned_url = base_url.rstrip("/")
+            # Security check: Validate URL scheme to prevent non-HTTP protocols
+            if not (cleaned_url.startswith("http://") or cleaned_url.startswith("https://")):
+                raise ValueError(
+                    f"Invalid base_url protocol scheme in '{base_url}'. Must start with http:// or https://"
+                )
+            self._base_url = cleaned_url
         else:
             self._base_url = self.DEFAULT_ENDPOINTS.get(
                 provider_clean, "http://localhost:1234/v1"

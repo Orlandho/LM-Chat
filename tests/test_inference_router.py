@@ -81,6 +81,18 @@ class TestInferenceRouter(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(router.base_url, "http://localhost:11434/v1")
         self.assertEqual(router.model, "qwen2.5-coder")
 
+    def test_invalid_base_url_scheme_raises_value_error(self):
+        """Test that non-HTTP base_url schemes raise ValueError for security."""
+        with self.assertRaises(ValueError):
+            InferenceRouter(provider="custom", base_url="file:///etc/passwd")
+
+        with self.assertRaises(ValueError):
+            InferenceRouter(provider="custom", base_url="gopher://localhost:1234")
+
+        router = InferenceRouter(provider="lm_studio")
+        with self.assertRaises(ValueError):
+            router.set_provider("lm_studio", base_url="ftp://example.com/v1")
+
     @patch("aiohttp.ClientSession.post")
     async def test_chat_completions_success(self, mock_post):
         """Test successful non-streaming chat completion request."""
