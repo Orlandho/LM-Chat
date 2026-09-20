@@ -81,6 +81,24 @@ class TestInferenceRouter(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(router.base_url, "http://localhost:11434/v1")
         self.assertEqual(router.model, "qwen2.5-coder")
 
+    def test_api_key_crlf_sanitization(self):
+        """Test that CRLF characters in API key are stripped to prevent header injection."""
+        router = InferenceRouter(
+            provider="cloud",
+            api_key="sk-test-123\r\nX-Injected-Header: bad",
+        )
+        self.assertEqual(router.api_key, "sk-test-123X-Injected-Header: bad")
+        headers = router.get_headers()
+        self.assertEqual(headers.get("Authorization"), "Bearer sk-test-123X-Injected-Header: bad")
+
+    def test_invalid_base_url_scheme_rejected(self):
+        """Test that invalid schemes for base_url raise ValueError."""
+        with self.assertRaises(ValueError):
+            InferenceRouter(provider="cloud", base_url="file:///etc/passwd")
+
+        with self.assertRaises(ValueError):
+            InferenceRouter(provider="cloud", base_url="ftp://malicious.site")
+
     @patch("aiohttp.ClientSession.post")
     async def test_chat_completions_success(self, mock_post):
         """Test successful non-streaming chat completion request."""
