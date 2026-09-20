@@ -5,6 +5,8 @@ on:
     branches:
       - main
     paths-ignore:
+      - '**.md'
+      - 'docs/**'
       - '.jules/**'
       - '.gitignore'
       - '.github/workflows/jules-ci.yml'
@@ -29,17 +31,15 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install uv (Fast Python Package Manager)
-        uses: astral-sh/setup-uv@v5
+      - name: Set up Python 3.11 with Pip Cache
+        uses: actions/setup-python@v5
         with:
-          enable-cache: true
+          python-version: '3.11'
+          cache: 'pip'
 
-      - name: Set up Python 3.11 via uv
-        run: uv python install 3.11
-
-      - name: Install Commitizen with Cache
+      - name: Install Commitizen
         run: |
-          uv pip install --system commitizen
+          pip install commitizen
 
       - name: Run Commitizen Version Bump
         id: cz
