@@ -174,9 +174,10 @@ class MCPServerConnection:
         while True:
             try:
                 line = await self.process.stdout.readline()
+                # Optimization: readline() returning empty bytes indicates EOF (stream closed).
+                # Breaking out prevents CPU-spinning infinite polling loops.
                 if not line:
-                    await asyncio.sleep(0.01)
-                    continue
+                    break
 
                 line_str = line.decode("utf-8").strip()
                 if not line_str:

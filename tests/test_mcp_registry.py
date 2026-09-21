@@ -272,3 +272,29 @@ async def test_stop_server_and_close(mock_subprocess):
 
     await registry.close()
     assert len(registry.servers) == 0
+
+
+@pytest.mark.asyncio
+async def test_listen_stdout_eof_handling(mock_subprocess):
+    """Verifica que _listen_stdout finaliza limpiamente al recibir EOF (b'') de stdout."""
+    _, mock_proc = mock_subprocess
+    registry = OmniMCPRegistry()
+
+    # Registrar servidor
+    mock_proc.stdout.add_line({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": {"protocolVersion": "2024-11-05"}
+    })
+    await registry.register_server("test_mcp", "python", ["server.py"])
+
+    server_conn = registry.servers["test_mcp"]
+
+    # Simular EOF enviando b'' a través de add_line
+    mock_proc.stdout._queue.put_nowait(b"")
+
+    # Esperar a que la tarea del reader termine debido a EOF
+    await asyncio.wait_for(server_conn._reader_task, timeout=2.0)
+
+    assert server_conn._reader_task.done()
+    await registry.close()
