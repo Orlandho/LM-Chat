@@ -13,6 +13,15 @@ class NetworkClient:
         # Executor for running blocking urllib requests
         self._executor = ThreadPoolExecutor(max_workers=2)
 
+    def _validate_url(self, url: str) -> str:
+        """Validates and sanitizes URL scheme to prevent SSRF and arbitrary file access."""
+        if not isinstance(url, str):
+            raise ValueError("URL must be a string.")
+        cleaned_url = url.strip().replace("\r", "").replace("\n", "")
+        if not (cleaned_url.startswith("http://") or cleaned_url.startswith("https://")):
+            raise ValueError(f"Invalid URL scheme in '{url}'. Only http:// and https:// are permitted.")
+        return cleaned_url
+
     def make_sync_request(self, url: str, payload: dict) -> dict:
         """
         Synchronous HTTP request using urllib.
@@ -24,19 +33,22 @@ class NetworkClient:
         Returns:
             dict: Structured response indicating success, data, or error details.
         """
-        data = json.dumps(payload).encode('utf-8')
-        req = urllib.request.Request(
-            url,
-            data=data,
-            headers={'Content-Type': 'application/json; charset=utf-8'},
-            method='POST'
-        )
-
         try:
+            cleaned_url = self._validate_url(url)
+            data = json.dumps(payload).encode('utf-8')
+            req = urllib.request.Request(
+                cleaned_url,
+                data=data,
+                headers={'Content-Type': 'application/json; charset=utf-8'},
+                method='POST'
+            )
+
             # Enforce 600 seconds timeout as specified
             with urllib.request.urlopen(req, timeout=600) as response:
                 response_body = response.read().decode('utf-8')
                 return {"success": True, "data": json.loads(response_body)}
+        except ValueError as e:
+            return {"success": False, "error_type": "ValueError", "message": str(e)}
         except urllib.error.HTTPError as e:
             error_body = e.read().decode('utf-8') if e.fp else str(e)
             return {"success": False, "error_type": "HTTPError", "status": e.code, "message": error_body}
@@ -50,19 +62,20 @@ class NetworkClient:
         Blocking HTTP request that reads SSE and puts chunks into an asyncio queue.
         This runs in a background thread.
         """
-        payload['stream'] = True
-        data = json.dumps(payload).encode('utf-8')
-        req = urllib.request.Request(
-            url,
-            data=data,
-            headers={
-                'Content-Type': 'application/json; charset=utf-8',
-                'Accept': 'text/event-stream'
-            },
-            method='POST'
-        )
-
         try:
+            cleaned_url = self._validate_url(url)
+            payload['stream'] = True
+            data = json.dumps(payload).encode('utf-8')
+            req = urllib.request.Request(
+                cleaned_url,
+                data=data,
+                headers={
+                    'Content-Type': 'application/json; charset=utf-8',
+                    'Accept': 'text/event-stream'
+                },
+                method='POST'
+            )
+
             with urllib.request.urlopen(req, timeout=600) as response:
                 for line in response:
                     line = line.decode('utf-8').strip()
@@ -80,6 +93,10 @@ class NetworkClient:
             # Signal completion
             asyncio.run_coroutine_threadsafe(queue.put({"success": True, "done": True}), loop)
 
+        except ValueError as e:
+            asyncio.run_coroutine_threadsafe(
+                queue.put({"success": False, "error_type": "ValueError", "message": str(e)}), loop
+            )
         except urllib.error.HTTPError as e:
             error_body = e.read().decode('utf-8') if e.fp else str(e)
             asyncio.run_coroutine_threadsafe(
