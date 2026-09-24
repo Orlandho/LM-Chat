@@ -255,6 +255,19 @@ class OmniMCPRegistry(IMCPClientRegistry):
         Returns:
             bool: True si el registro e inicialización fueron exitosos, False en caso contrario.
         """
+        if not isinstance(name, str) or not name.strip():
+            logger.error("Error de validación: 'name' debe ser una cadena no vacía.")
+            return False
+        if not isinstance(command, str) or not command.strip():
+            logger.error(f"Error de validación para '{name}': 'command' debe ser una cadena no vacía.")
+            return False
+        if not isinstance(args, list):
+            logger.error(f"Error de validación para '{name}': 'args' debe ser una lista.")
+            return False
+        if env is not None and not isinstance(env, dict):
+            logger.error(f"Error de validación para '{name}': 'env' debe ser un diccionario.")
+            return False
+
         if name in self.servers:
             logger.warning(f"El servidor MCP '{name}' ya se encuentra registrado. Se reiniciará.")
             await self.stop_server(name)
@@ -327,6 +340,13 @@ class OmniMCPRegistry(IMCPClientRegistry):
         Returns:
             Dict[str, Any]: Respuesta de la invocación con status ('success' o 'error') y datos.
         """
+        if not isinstance(server_name, str) or not server_name.strip():
+            return {"status": "error", "error": "Error de validación: 'server_name' debe ser una cadena no vacía."}
+        if not isinstance(tool_name, str) or not tool_name.strip():
+            return {"status": "error", "error": "Error de validación: 'tool_name' debe ser una cadena no vacía."}
+        if arguments is None or not isinstance(arguments, dict):
+            return {"status": "error", "error": "Error de validación: 'arguments' debe ser un diccionario."}
+
         if server_name not in self.servers:
             return {
                 "status": "error",

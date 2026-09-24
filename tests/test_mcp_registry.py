@@ -272,3 +272,45 @@ async def test_stop_server_and_close(mock_subprocess):
 
     await registry.close()
     assert len(registry.servers) == 0
+
+
+@pytest.mark.asyncio
+async def test_register_server_input_validation():
+    """Prueba que el registro de servidores rechace entradas inválidas o vacías."""
+    registry = OmniMCPRegistry()
+
+    # Nombre inválido o vacío
+    assert await registry.register_server(name="", command="python", args=[]) is False
+    assert await registry.register_server(name=None, command="python", args=[]) is False
+
+    # Comando inválido o vacío
+    assert await registry.register_server(name="srv", command="", args=[]) is False
+    assert await registry.register_server(name="srv", command=None, args=[]) is False
+
+    # Argumentos no de tipo lista
+    assert await registry.register_server(name="srv", command="python", args="invalid") is False
+
+    # Entorno no de tipo diccionario
+    assert await registry.register_server(name="srv", command="python", args=[], env="invalid") is False
+
+    await registry.close()
+
+
+@pytest.mark.asyncio
+async def test_call_tool_input_validation():
+    """Prueba que la invocación de herramientas rechace parámetros inválidos."""
+    registry = OmniMCPRegistry()
+
+    res1 = await registry.call_tool(server_name="", tool_name="tool", arguments={})
+    assert res1["status"] == "error"
+    assert "validación" in res1["error"].lower()
+
+    res2 = await registry.call_tool(server_name="srv", tool_name="", arguments={})
+    assert res2["status"] == "error"
+    assert "validación" in res2["error"].lower()
+
+    res3 = await registry.call_tool(server_name="srv", tool_name="tool", arguments=None)
+    assert res3["status"] == "error"
+    assert "validación" in res3["error"].lower()
+
+    await registry.close()
