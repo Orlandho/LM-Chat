@@ -13,6 +13,16 @@ class NetworkClient:
         # Executor for running blocking urllib requests
         self._executor = ThreadPoolExecutor(max_workers=2)
 
+    def _validate_url_scheme(self, url: str) -> bool:
+        """
+        Security check: Validate that the URL scheme uses HTTP or HTTPS
+        to prevent SSRF, Local File Inclusion (LFI), and non-HTTP protocol manipulation (e.g. file://, ftp://).
+        """
+        if not isinstance(url, str):
+            return False
+        cleaned_url = url.strip().lower()
+        return cleaned_url.startswith("http://") or cleaned_url.startswith("https://")
+
     def make_sync_request(self, url: str, payload: dict) -> dict:
         """
         Synchronous HTTP request using urllib.
@@ -24,6 +34,13 @@ class NetworkClient:
         Returns:
             dict: Structured response indicating success, data, or error details.
         """
+        if not self._validate_url_scheme(url):
+            return {
+                "success": False,
+                "error_type": "ValueError",
+                "message": f"Security validation failed: Invalid URL scheme for '{url}'. Must start with http:// or https://"
+            }
+
         data = json.dumps(payload).encode('utf-8')
         req = urllib.request.Request(
             url,
@@ -50,6 +67,17 @@ class NetworkClient:
         Blocking HTTP request that reads SSE and puts chunks into an asyncio queue.
         This runs in a background thread.
         """
+        if not self._validate_url_scheme(url):
+            asyncio.run_coroutine_threadsafe(
+                queue.put({
+                    "success": False,
+                    "error_type": "ValueError",
+                    "message": f"Security validation failed: Invalid URL scheme for '{url}'. Must start with http:// or https://"
+                }),
+                loop
+            )
+            return
+
         payload['stream'] = True
         data = json.dumps(payload).encode('utf-8')
         req = urllib.request.Request(
