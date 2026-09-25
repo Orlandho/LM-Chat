@@ -174,9 +174,9 @@ class MCPServerConnection:
         while True:
             try:
                 line = await self.process.stdout.readline()
+                # Clean exit on EOF (empty bytes) when subprocess terminates or closes stdout
                 if not line:
-                    await asyncio.sleep(0.01)
-                    continue
+                    break
 
                 line_str = line.decode("utf-8").strip()
                 if not line_str:
@@ -276,10 +276,17 @@ class OmniMCPRegistry(IMCPClientRegistry):
         """
         all_tools: List[Dict[str, Any]] = []
 
-        for server_name, server_conn in self.servers.items():
-            if not server_conn._is_initialized:
-                continue
+        initialized_servers = [
+            (server_name, server_conn)
+            for server_name, server_conn in self.servers.items()
+            if server_conn._is_initialized
+        ]
 
+        if not initialized_servers:
+            return all_tools
+
+        async def _fetch_tools_for_server(server_name: str, server_conn: MCPServerConnection) -> List[Dict[str, Any]]:
+            server_tools: List[Dict[str, Any]] = []
             try:
                 response = await server_conn.send_request("tools/list", {})
                 if "result" in response and "tools" in response["result"]:
@@ -302,11 +309,21 @@ class OmniMCPRegistry(IMCPClientRegistry):
                                 "parameters": input_schema
                             }
                         }
-                        all_tools.append(formatted_tool)
+                        server_tools.append(formatted_tool)
                 elif "error" in response:
                     logger.error(f"Error solicitando tools/list al servidor MCP '{server_name}': {response['error']}")
             except Exception as e:
                 logger.error(f"Excepción al listar herramientas del servidor MCP '{server_name}': {e}", exc_info=True)
+            return server_tools
+
+        # Performance optimization: Query all initialized MCP servers concurrently using asyncio.gather
+        # instead of sequential await loops (reduces tool listing latency from O(N * T) to O(max(T))).
+        results = await asyncio.gather(
+            *[_fetch_tools_for_server(s_name, s_conn) for s_name, s_conn in initialized_servers]
+        )
+
+        for server_tools in results:
+            all_tools.extend(server_tools)
 
         return all_tools
 
