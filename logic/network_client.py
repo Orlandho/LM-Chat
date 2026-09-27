@@ -24,6 +24,14 @@ class NetworkClient:
         Returns:
             dict: Structured response indicating success, data, or error details.
         """
+        # Security: Validate URL scheme to prevent SSRF and file scheme access
+        if not isinstance(url, str) or not (url.strip().startswith("http://") or url.strip().startswith("https://")):
+            return {
+                "success": False,
+                "error_type": "ValueError",
+                "message": f"Invalid URL scheme: '{url}'. Must start with http:// or https://",
+            }
+
         data = json.dumps(payload).encode('utf-8')
         req = urllib.request.Request(
             url,
@@ -50,6 +58,19 @@ class NetworkClient:
         Blocking HTTP request that reads SSE and puts chunks into an asyncio queue.
         This runs in a background thread.
         """
+        # Security: Validate URL scheme to prevent SSRF and file scheme access
+        if not isinstance(url, str) or not (url.strip().startswith("http://") or url.strip().startswith("https://")):
+            asyncio.run_coroutine_threadsafe(
+                queue.put({
+                    "success": False,
+                    "error_type": "ValueError",
+                    "message": f"Invalid URL scheme: '{url}'. Must start with http:// or https://",
+                }),
+                loop,
+            )
+            asyncio.run_coroutine_threadsafe(queue.put({"success": True, "done": True}), loop)
+            return
+
         payload['stream'] = True
         data = json.dumps(payload).encode('utf-8')
         req = urllib.request.Request(
