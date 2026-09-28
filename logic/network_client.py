@@ -13,6 +13,28 @@ class NetworkClient:
         # Executor for running blocking urllib requests
         self._executor = ThreadPoolExecutor(max_workers=2)
 
+    def _validate_url(self, url: str) -> str:
+        """
+        Validates and sanitizes the destination URL to prevent SSRF and header injection.
+
+        Args:
+            url (str): Target URL.
+
+        Returns:
+            str: Cleaned URL.
+
+        Raises:
+            ValueError: If URL is empty or scheme is not http:// or https://.
+        """
+        if not isinstance(url, str) or not url.strip():
+            raise ValueError("URL must be a non-empty string.")
+
+        clean_url = url.strip().replace("\r", "").replace("\n", "")
+        if not (clean_url.startswith("http://") or clean_url.startswith("https://")):
+            raise ValueError(f"Invalid URL scheme: '{url}'. Only 'http://' and 'https://' are allowed.")
+
+        return clean_url
+
     def make_sync_request(self, url: str, payload: dict) -> dict:
         """
         Synchronous HTTP request using urllib.
@@ -24,19 +46,22 @@ class NetworkClient:
         Returns:
             dict: Structured response indicating success, data, or error details.
         """
-        data = json.dumps(payload).encode('utf-8')
-        req = urllib.request.Request(
-            url,
-            data=data,
-            headers={'Content-Type': 'application/json; charset=utf-8'},
-            method='POST'
-        )
-
         try:
+            clean_url = self._validate_url(url)
+            data = json.dumps(payload).encode('utf-8')
+            req = urllib.request.Request(
+                clean_url,
+                data=data,
+                headers={'Content-Type': 'application/json; charset=utf-8'},
+                method='POST'
+            )
+
             # Enforce 600 seconds timeout as specified
             with urllib.request.urlopen(req, timeout=600) as response:
                 response_body = response.read().decode('utf-8')
                 return {"success": True, "data": json.loads(response_body)}
+        except ValueError as e:
+            return {"success": False, "error_type": "ValueError", "message": str(e)}
         except urllib.error.HTTPError as e:
             error_body = e.read().decode('utf-8') if e.fp else str(e)
             return {"success": False, "error_type": "HTTPError", "status": e.code, "message": error_body}
@@ -50,19 +75,20 @@ class NetworkClient:
         Blocking HTTP request that reads SSE and puts chunks into an asyncio queue.
         This runs in a background thread.
         """
-        payload['stream'] = True
-        data = json.dumps(payload).encode('utf-8')
-        req = urllib.request.Request(
-            url,
-            data=data,
-            headers={
-                'Content-Type': 'application/json; charset=utf-8',
-                'Accept': 'text/event-stream'
-            },
-            method='POST'
-        )
-
         try:
+            clean_url = self._validate_url(url)
+            payload['stream'] = True
+            data = json.dumps(payload).encode('utf-8')
+            req = urllib.request.Request(
+                clean_url,
+                data=data,
+                headers={
+                    'Content-Type': 'application/json; charset=utf-8',
+                    'Accept': 'text/event-stream'
+                },
+                method='POST'
+            )
+
             with urllib.request.urlopen(req, timeout=600) as response:
                 for line in response:
                     line = line.decode('utf-8').strip()
@@ -80,6 +106,10 @@ class NetworkClient:
             # Signal completion
             asyncio.run_coroutine_threadsafe(queue.put({"success": True, "done": True}), loop)
 
+        except ValueError as e:
+            asyncio.run_coroutine_threadsafe(
+                queue.put({"success": False, "error_type": "ValueError", "message": str(e)}), loop
+            )
         except urllib.error.HTTPError as e:
             error_body = e.read().decode('utf-8') if e.fp else str(e)
             asyncio.run_coroutine_threadsafe(
