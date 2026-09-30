@@ -137,6 +137,16 @@ class TestChatView:
         window.append_to_last_message(" y continuación del stream.")
         assert label_mock.text == "Inicio de la respuesta y continuación del stream."
 
+    def test_scroll_to_bottom_debouncing(self):
+        window = ChatWindow()
+        assert not window._scroll_task_pending
+
+        # Simulate pending scroll task
+        window._scroll_task_pending = True
+        window._scroll_to_bottom()
+        # Should stay pending without error or duplicate task creation
+        assert window._scroll_task_pending
+
     def test_destroy_cleanup(self):
         window = ChatWindow()
         window.destroy()

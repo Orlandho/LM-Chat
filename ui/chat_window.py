@@ -96,6 +96,7 @@ class ChatWindow(IChatView):
 
         self._message_labels: List[ui.Label] = []
         self._last_assistant_bubble_components: Optional[Dict[str, Any]] = None
+        self._scroll_task_pending: bool = False
 
         # Configuración de la ventana anclable nativa omni.ui
         dock_pref = getattr(ui.DockPreference, "RIGHT_BOTTOM", 0)
@@ -454,14 +455,21 @@ class ChatWindow(IChatView):
 
     def _scroll_to_bottom(self) -> None:
         """Fuerza el ScrollingFrame a desplazarse hasta el fondo."""
+        # Optimization: Debounce scroll task creation during rapid LLM token streaming
+        # to prevent creating hundreds of redundant asyncio tasks on the event loop.
+        if getattr(self, "_scroll_task_pending", False):
+            return
+
         async def scroll_down():
-            await asyncio.sleep(0.01)
             try:
+                await asyncio.sleep(0.01)
                 if hasattr(self, "_scrolling_frame") and self._scrolling_frame:
                     self._scrolling_frame.scroll_y_max = 1000000.0
                     self._scrolling_frame.scroll_y = self._scrolling_frame.scroll_y_max
             except Exception:
                 pass
+            finally:
+                self._scroll_task_pending = False
 
         try:
             try:
@@ -470,9 +478,10 @@ class ChatWindow(IChatView):
                 loop = None
 
             if loop and loop.is_running():
+                self._scroll_task_pending = True
                 loop.create_task(scroll_down())
         except Exception:
-            pass
+            self._scroll_task_pending = False
 
     def destroy(self) -> None:
         """Limpia referencias y destruye la ventana."""
