@@ -241,3 +241,83 @@ class IChatHistoryManager(ABC):
         """Importa una sesión desde una cadena JSON y la persiste localmente."""
         pass
 
+
+@dataclass
+class ProviderSettings:
+    """Configuración persistente para un proveedor de inferencia."""
+    name: str
+    provider_key: str
+    base_url: str
+    default_model: str
+    available_models: List[str]
+    api_key: Optional[str] = None
+    temperature: float = 0.7
+    timeout: float = 600.0
+    max_tokens: int = 4096
+    env_key: Optional[str] = None
+
+
+class ISettingsManager(ABC):
+    """Contrato para el gestor de configuración persistente y selección de servicios/modelos."""
+
+    @abstractmethod
+    def get_default_provider(self) -> str:
+        """Obtiene el nombre legible del proveedor predeterminado."""
+        pass
+
+    @abstractmethod
+    def set_default_provider(self, provider_name: str) -> None:
+        """Establece el proveedor predeterminado."""
+        pass
+
+    @abstractmethod
+    def get_default_model(self, provider_name: str) -> str:
+        """Obtiene el modelo predeterminado para el proveedor indicado."""
+        pass
+
+    @abstractmethod
+    def set_default_model(self, provider_name: str, model_name: str) -> None:
+        """Establece el modelo predeterminado para el proveedor indicado."""
+        pass
+
+    @abstractmethod
+    def get_provider_config(self, provider_name: str) -> Dict[str, Any]:
+        """Obtiene los parámetros de configuración para un proveedor dado."""
+        pass
+
+    @abstractmethod
+    def update_provider_config(self, provider_name: str, **kwargs: Any) -> bool:
+        """Actualiza la configuración de un proveedor dado."""
+        pass
+
+    @abstractmethod
+    def get_effective_api_key(self, provider_name: str) -> Optional[str]:
+        """Obtiene la API key configurada o resuelta desde variables de entorno."""
+        pass
+
+    @abstractmethod
+    def get_all_providers(self) -> List[str]:
+        """Retorna la lista de todos los nombres legibles de proveedores soportados."""
+        pass
+
+    @abstractmethod
+    def get_available_models(self, provider_name: str) -> List[str]:
+        """Retorna la lista de modelos disponibles/recomendados para un proveedor."""
+        pass
+
+    @abstractmethod
+    def save(self) -> bool:
+        """Persiste la configuración a disco."""
+        pass
+
+    @abstractmethod
+    def load(self) -> Dict[str, Any]:
+        """Carga la configuración desde disco o inicializa valores por defecto."""
+        pass
+
+    @abstractmethod
+    def reset_to_defaults(self) -> None:
+        """Restablece la configuración a los valores de fábrica."""
+        pass
+
+

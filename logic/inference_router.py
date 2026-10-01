@@ -8,10 +8,12 @@ decoupled gateway for directing chat completion requests across multiple LLM pro
 LM Studio, Ollama, vLLM (Enterprise/Nemotron), and Cloud APIs (OpenAI, Anthropic, Gemini).
 """
 
+import os
 import asyncio
 import json
 from typing import AsyncGenerator, Dict, List, Optional, Any
 import aiohttp
+
 
 
 class InferenceRouter:
@@ -27,6 +29,11 @@ class InferenceRouter:
         "ollama": "http://localhost:11434/v1",
         "vllm": "http://localhost:8000/v1",
         "cloud": "https://api.openai.com/v1",
+        "openai": "https://api.openai.com/v1",
+        "claude": "https://api.anthropic.com/v1",
+        "anthropic": "https://api.anthropic.com/v1",
+        "nvidia_spark": "https://integrate.api.nvidia.com/v1",
+        "nemotron": "https://integrate.api.nvidia.com/v1",
     }
 
     DEFAULT_MODELS: Dict[str, str] = {
@@ -34,7 +41,13 @@ class InferenceRouter:
         "ollama": "llama3",
         "vllm": "nvidia/nemotron-4-70b-instruct",
         "cloud": "gpt-4o",
+        "openai": "gpt-4o",
+        "claude": "claude-3-7-sonnet-latest",
+        "anthropic": "claude-3-7-sonnet-latest",
+        "nvidia_spark": "nvidia/llama-3.1-nemotron-70b-instruct",
+        "nemotron": "nvidia/nemotron-4-340b-instruct",
     }
+
 
     def __init__(
         self,
@@ -124,6 +137,57 @@ class InferenceRouter:
         """Returns the configured request timeout."""
         return self._timeout
 
+    def _is_anthropic_direct(self) -> bool:
+        """Determines if Anthropic messages API protocol is active."""
+        return (self._provider in ("claude", "anthropic")) or ("api.anthropic.com" in self._base_url)
+
+    def _prepare_payload(
+        self,
+        messages: List[Dict[str, str]],
+        model: Optional[str] = None,
+        temperature: float = 0.7,
+        stream: bool = False,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """Formats the payload according to whether Anthropic direct or standard OpenAI format is used."""
+        target_model = model or self._model
+        if self._is_anthropic_direct():
+            system_text = ""
+            anthropic_msgs = []
+            for m in messages:
+                role = m.get("role", "user")
+                content = m.get("content", "")
+                if role == "system":
+                    system_text = f"{system_text}\n{content}".strip() if system_text else content
+                elif role in ("user", "assistant"):
+                    anthropic_msgs.append({"role": role, "content": content})
+            if not anthropic_msgs:
+                anthropic_msgs.append({"role": "user", "content": "Hola"})
+
+            payload: Dict[str, Any] = {
+                "model": target_model,
+                "messages": anthropic_msgs,
+                "max_tokens": kwargs.get("max_tokens", 4096),
+                "temperature": temperature,
+                "stream": stream,
+            }
+            if system_text:
+                payload["system"] = system_text
+            for k, v in kwargs.items():
+                if k not in payload:
+                    payload[k] = v
+            return payload
+
+        # Standard OpenAI-compatible format (OpenAI, Ollama, LM Studio, NVIDIA Spark, vLLM)
+        payload = {
+            "model": target_model,
+            "messages": messages,
+            "temperature": temperature,
+            "stream": stream,
+            **kwargs,
+        }
+        return payload
+
     def get_endpoint_url(self, path: str = "/chat/completions") -> str:
         """
         Constructs full URL for an API endpoint path.
@@ -135,18 +199,36 @@ class InferenceRouter:
             str: Full URL.
         """
         clean_path = path if path.startswith("/") else f"/{path}"
+        if self._is_anthropic_direct() and clean_path in ("/chat/completions", "chat/completions"):
+            clean_path = "/messages"
         return f"{self._base_url}{clean_path}"
 
     def get_headers(self) -> Dict[str, str]:
         """
-        Constructs HTTP request headers including Authorization if API key is provided.
+        Constructs HTTP request headers including Authorization or x-api-key if API key is provided.
 
         Returns:
             Dict[str, str]: HTTP headers.
         """
         headers = {"Content-Type": "application/json; charset=utf-8"}
-        if self._api_key:
-            headers["Authorization"] = f"Bearer {self._api_key}"
+        effective_key = self._api_key
+        if not effective_key:
+            if self._provider in ("openai", "open_ai"):
+                effective_key = os.getenv("OPENAI_API_KEY")
+            elif self._provider in ("claude", "anthropic"):
+                effective_key = os.getenv("ANTHROPIC_API_KEY")
+            elif self._provider in ("nvidia_spark", "nemotron", "nvidia", "spark"):
+                effective_key = os.getenv("NVIDIA_API_KEY")
+            elif self._provider == "cloud":
+                effective_key = os.getenv("OPENAI_API_KEY")
+
+        if effective_key:
+            clean_key = effective_key.strip().replace("\r", "").replace("\n", "")
+            if self._is_anthropic_direct():
+                headers["x-api-key"] = clean_key
+                headers["anthropic-version"] = "2023-06-01"
+            else:
+                headers["Authorization"] = f"Bearer {clean_key}"
         return headers
 
     async def chat_completions(
@@ -170,13 +252,13 @@ class InferenceRouter:
         """
         url = self.get_endpoint_url("/chat/completions")
         headers = self.get_headers()
-        payload = {
-            "model": model or self._model,
-            "messages": messages,
-            "temperature": temperature,
-            "stream": False,
+        payload = self._prepare_payload(
+            messages=messages,
+            model=model,
+            temperature=temperature,
+            stream=False,
             **kwargs,
-        }
+        )
 
         client_timeout = aiohttp.ClientTimeout(total=self._timeout)
 
@@ -186,6 +268,25 @@ class InferenceRouter:
                     if response.status == 200:
                         body_text = await response.text(encoding="utf-8")
                         data = json.loads(body_text)
+                        # Normalize Anthropic response format to OpenAI-standard choices structure
+                        if self._is_anthropic_direct() and "content" in data and isinstance(data["content"], list):
+                            text_parts = [b.get("text", "") for b in data["content"] if b.get("type") == "text"]
+                            full_text = "".join(text_parts)
+                            normalized_data = {
+                                "id": data.get("id", ""),
+                                "choices": [
+                                    {
+                                        "index": 0,
+                                        "message": {
+                                            "role": "assistant",
+                                            "content": full_text,
+                                        },
+                                        "finish_reason": data.get("stop_reason", "stop"),
+                                    }
+                                ],
+                                "usage": data.get("usage", {}),
+                            }
+                            return {"success": True, "data": normalized_data}
                         return {"success": True, "data": data}
                     else:
                         error_text = await response.text(encoding="utf-8")
@@ -237,13 +338,13 @@ class InferenceRouter:
         url = self.get_endpoint_url("/chat/completions")
         headers = self.get_headers()
         headers["Accept"] = "text/event-stream"
-        payload = {
-            "model": model or self._model,
-            "messages": messages,
-            "temperature": temperature,
-            "stream": True,
+        payload = self._prepare_payload(
+            messages=messages,
+            model=model,
+            temperature=temperature,
+            stream=True,
             **kwargs,
-        }
+        )
 
         client_timeout = aiohttp.ClientTimeout(total=self._timeout)
 
@@ -269,9 +370,35 @@ class InferenceRouter:
                                 break
                             try:
                                 data_json = json.loads(data_str)
-                                yield {"success": True, "data": data_json}
+                                # Check for Anthropic SSE format
+                                event_type = data_json.get("type")
+                                if event_type == "content_block_delta":
+                                    delta_obj = data_json.get("delta", {})
+                                    if delta_obj.get("type") == "text_delta":
+                                        chunk_text = delta_obj.get("text", "")
+                                        yield {
+                                            "success": True,
+                                            "data": {
+                                                "choices": [
+                                                    {"delta": {"content": chunk_text}}
+                                                ]
+                                            },
+                                        }
+                                elif event_type == "message_stop":
+                                    break
+                                elif event_type == "error":
+                                    yield {
+                                        "success": False,
+                                        "error_type": "ClaudeError",
+                                        "message": str(data_json.get("error")),
+                                    }
+                                    break
+                                else:
+                                    if "choices" in data_json:
+                                        yield {"success": True, "data": data_json}
                             except json.JSONDecodeError:
                                 continue
+
 
         except aiohttp.ClientConnectorError as e:
             yield {

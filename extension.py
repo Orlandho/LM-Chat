@@ -66,8 +66,25 @@ class LMChatExtension(omni.ext.IExt):
             mod = self._model.current_model
             if prov:
                 norm_prov = prov.lower().replace(" ", "_").replace("apis", "").replace("api", "").strip("_")
-                if norm_prov in ["lm_studio", "ollama", "vllm", "cloud"]:
-                    self._agent_manager.set_provider(provider=norm_prov, model=mod)
+                sm = getattr(self._model, "settings_manager", None)
+                base_url = None
+                api_key = None
+                if sm:
+                    cfg = sm.get_provider_config(prov)
+                    base_url = cfg.get("base_url")
+                    api_key = sm.get_effective_api_key(prov)
+
+                valid_providers = [
+                    "lm_studio", "ollama", "vllm", "cloud",
+                    "openai", "claude", "anthropic", "nvidia_spark", "nemotron",
+                ]
+                if norm_prov in valid_providers:
+                    self._agent_manager.set_provider(
+                        provider=norm_prov,
+                        base_url=base_url,
+                        model=mod,
+                        api_key=api_key,
+                    )
 
     def _on_session_changed(self, session):
         """Synchronizes AgentManager context when user switches or creates a session."""
@@ -78,8 +95,26 @@ class LMChatExtension(omni.ext.IExt):
                 mod = session.metadata.get("model")
                 if prov:
                     norm_prov = prov.lower().replace(" ", "_").replace("apis", "").replace("api", "").strip("_")
-                    if norm_prov in ["lm_studio", "ollama", "vllm", "cloud"]:
-                        self._agent_manager.set_provider(provider=norm_prov, model=mod)
+                    sm = getattr(self._model, "settings_manager", None)
+                    base_url = None
+                    api_key = None
+                    if sm:
+                        cfg = sm.get_provider_config(prov)
+                        base_url = cfg.get("base_url")
+                        api_key = sm.get_effective_api_key(prov)
+
+                    valid_providers = [
+                        "lm_studio", "ollama", "vllm", "cloud",
+                        "openai", "claude", "anthropic", "nvidia_spark", "nemotron",
+                    ]
+                    if norm_prov in valid_providers:
+                        self._agent_manager.set_provider(
+                            provider=norm_prov,
+                            base_url=base_url,
+                            model=mod,
+                            api_key=api_key,
+                        )
+
 
     def _on_send_message_callback(self, prompt: str):
         """Callback triggered by the UI when the user clicks 'Enviar'."""

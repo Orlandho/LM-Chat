@@ -176,12 +176,14 @@ class ChatWindow(IChatView):
 
         self._message_labels: List[ui.Label] = []
         self._last_assistant_bubble_components: Optional[Dict[str, Any]] = None
+        self._settings_window: Optional[Any] = None
 
         # Configuración de la ventana anclable nativa omni.ui
         dock_pref = getattr(ui.DockPreference, "RIGHT_BOTTOM", 0)
-        self._window = ui.Window("IA Agent Chat", width=850, height=650, dock_preference=dock_pref)
+        self._window = ui.Window("LM-Chat", width=850, height=650, dock_preference=dock_pref)
 
         self._model.subscribe(self._on_model_updated)
+
         self._build_ui()
 
     @property
@@ -295,19 +297,30 @@ class ChatWindow(IChatView):
                 self._build_input_area()
 
     def _build_header(self) -> None:
-        """Renderiza el encabezado con selectores de Proveedor, Modelo y Badge de Estado."""
-        with ui.HStack(height=45, style={"background_color": 0xFF2A2A2A}, padding=8, spacing=10):
+        """Renderiza el encabezado con selectores de Proveedor, Modelo, Botón de Settings y Badge de Estado."""
+        with ui.HStack(height=45, style={"background_color": 0xFF2A2A2A}, padding=8, spacing=8):
             # Selector de Proveedor
-            ui.Label("Proveedor:", width=70, style={"color": 0xFFCCCCCC, "font_size": 13})
-            self._provider_combo = ui.ComboBox(0, *self._model.providers, width=130, height=26)
-            self._provider_combo.model.add_item_changed_fn(self._on_provider_selection_changed)
+            ui.Label("Proveedor:", width=68, style={"color": 0xFFCCCCCC, "font_size": 13})
+            self._provider_combo_frame = ui.Frame(width=130, height=26)
+            self._rebuild_provider_combo()
 
-            ui.Spacer(width=10)
+            ui.Spacer(width=6)
 
             # Selector de Modelo (dinámico)
-            ui.Label("Modelo:", width=55, style={"color": 0xFFCCCCCC, "font_size": 13})
-            self._model_combo_frame = ui.Frame(width=200, height=26)
+            ui.Label("Modelo:", width=52, style={"color": 0xFFCCCCCC, "font_size": 13})
+            self._model_combo_frame = ui.Frame(width=180, height=26)
             self._rebuild_model_combo()
+
+            ui.Spacer(width=6)
+
+            # Botón de Configuración / Settings
+            self._settings_button = ui.Button(
+                "⚙ Settings",
+                width=85,
+                height=26,
+                style={"background_color": 0xFF383838, "border_radius": 4, "font_size": 11},
+                clicked_fn=self._open_settings_dialog,
+            )
 
             ui.Spacer()
 
@@ -323,6 +336,45 @@ class ChatWindow(IChatView):
                         alignment=ui.Alignment.CENTER,
                         style={"color": 0xFFFFFFFF, "font_size": 12, "font_weight": "bold"}
                     )
+
+    def _rebuild_provider_combo(self) -> None:
+        """Reconstruye el selector de proveedores según la lista activa."""
+        if not hasattr(self, "_provider_combo_frame") or not self._provider_combo_frame:
+            return
+
+        providers = self._model.providers
+        current_prov = self._model.current_provider
+        active_idx = 0
+        for idx, p in enumerate(providers):
+            if p == current_prov:
+                active_idx = idx
+                break
+
+        self._is_updating_provider_combo = True
+        try:
+            self._provider_combo_frame.clear()
+            with self._provider_combo_frame:
+                self._provider_combo = ui.ComboBox(active_idx, *providers, width=130, height=26)
+                self._provider_combo.model.add_item_changed_fn(self._on_provider_selection_changed)
+        finally:
+            self._is_updating_provider_combo = False
+
+    def _open_settings_dialog(self) -> None:
+        """Abre la ventana modal de configuración de servicios y modelos."""
+        if not hasattr(self, "_settings_window") or self._settings_window is None:
+            from ui.settings_window import SettingsWindow
+            self._settings_window = SettingsWindow(
+                settings_manager=getattr(self._model, "settings_manager", None),
+                on_save_callback=self._on_settings_saved,
+            )
+        self._settings_window.show()
+
+    def _on_settings_saved(self, default_provider: str, default_model: str) -> None:
+        """Callback al guardar ajustes en SettingsWindow."""
+        self._model.set_provider(default_provider)
+        self._model.set_model(default_model)
+        self._rebuild_provider_combo()
+        self._rebuild_model_combo()
 
     def _rebuild_model_combo(self) -> None:
         """Reconstruye el selector de modelos según el proveedor activo."""
@@ -341,10 +393,11 @@ class ChatWindow(IChatView):
         try:
             self._model_combo_frame.clear()
             with self._model_combo_frame:
-                self._model_combo = ui.ComboBox(active_idx, *models, width=200, height=26)
+                self._model_combo = ui.ComboBox(active_idx, *models, width=180, height=26)
                 self._model_combo.model.add_item_changed_fn(self._on_model_selection_changed)
         finally:
             self._is_updating_model_combo = False
+
 
     def _build_session_bar(self) -> None:
         """Renderiza la barra de control de sesiones y selector de historial local."""
@@ -726,4 +779,8 @@ class ChatWindow(IChatView):
         """Limpia referencias y destruye la ventana."""
         if self._model:
             self._model.unsubscribe(self._on_model_updated)
+        if hasattr(self, "_settings_window") and self._settings_window:
+            self._settings_window.destroy()
+            self._settings_window = None
         self._window = None
+

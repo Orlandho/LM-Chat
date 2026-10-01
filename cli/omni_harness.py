@@ -59,9 +59,10 @@ def parse_arguments() -> argparse.Namespace:
         "--provider",
         type=str,
         default="lm_studio",
-        choices=["lm_studio", "ollama", "vllm", "cloud"],
+        choices=["lm_studio", "ollama", "vllm", "cloud", "openai", "claude", "nvidia_spark"],
         help="Inference provider (default: lm_studio)",
     )
+
     parser.add_argument(
         "-m",
         "--model",
