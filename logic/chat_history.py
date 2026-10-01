@@ -116,7 +116,7 @@ class LocalChatHistoryManager(IChatHistoryManager):
         Returns:
             Optional[ChatSession]: La sesión reconstruida o None si no existe o es corrupta.
         """
-        if not session_id:
+        if not isinstance(session_id, str) or not session_id:
             return None
 
         file_path = self._get_session_path(session_id)
@@ -246,6 +246,8 @@ class LocalChatHistoryManager(IChatHistoryManager):
         Returns:
             bool: True si el archivo fue eliminado, False si no existía o falló.
         """
+        if not isinstance(session_id, str) or not session_id:
+            return False
         file_path = self._get_session_path(session_id)
         if not os.path.exists(file_path):
             return False
@@ -340,6 +342,8 @@ class LocalChatHistoryManager(IChatHistoryManager):
         Returns:
             Optional[str]: Representación JSON formateada o None si no existe.
         """
+        if not isinstance(session_id, str) or not session_id:
+            return None
         session = self.get_session(session_id)
         if not session:
             return None
@@ -354,14 +358,21 @@ class LocalChatHistoryManager(IChatHistoryManager):
         Returns:
             Optional[ChatSession]: Sesión importada o None si el JSON es inválido.
         """
+        # Security: Input type validation and length restriction (10MB limit) to prevent CPU/memory exhaustion DoS
+        if not isinstance(json_content, str) or not json_content.strip():
+            return None
+        if len(json_content) > 10_000_000:
+            print("[LocalChatHistoryManager] Error: Payload de importación excede el límite máximo de 10MB.")
+            return None
+
         try:
             data = json.loads(json_content)
             if not isinstance(data, dict):
                 return None
 
-            # Si no tiene session_id o ya existe, asignar uno nuevo para evitar sobreescritura accidental
+            # Si no tiene session_id o ya existe o no es string, asignar uno nuevo para evitar sobreescritura accidental
             session_id = data.get("session_id")
-            if not session_id or self.get_session(session_id) is not None:
+            if not isinstance(session_id, str) or not session_id or self.get_session(session_id) is not None:
                 data["session_id"] = uuid.uuid4().hex
 
             session = ChatSession.from_dict(data)
