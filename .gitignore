@@ -16,3 +16,7 @@ __pycache__/
 # Entornos virtuales
 venv/
 env/
+
+# Pytest y archivos de desarrollo local
+.pytest_cache/
+scratch/

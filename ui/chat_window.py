@@ -12,7 +12,7 @@ from typing import Callable, Any, Optional, List, Dict, Tuple
 import omni.ui as ui
 import omni.appwindow
 
-from core.interfaces import IChatView
+from core.interfaces import IChatView, ChatSession
 from ui.models import ChatModel
 
 # Pre-compiled regular expression pattern for Markdown code block parsing
@@ -31,6 +31,7 @@ class ChatDelegate:
         """
         self._model = model
         self._submit_callback = submit_callback
+        self._session_changed_callback: Optional[Callable[[ChatSession], Any]] = None
 
     def set_submit_callback(self, callback: Callable[[str], Any]) -> None:
         """Establece el callback de envío.
@@ -39,6 +40,14 @@ class ChatDelegate:
             callback (Callable[[str], Any]): Función a invocar.
         """
         self._submit_callback = callback
+
+    def set_session_changed_callback(self, callback: Callable[[ChatSession], Any]) -> None:
+        """Establece el callback al cambiar o cargar una sesión.
+
+        Args:
+            callback (Callable[[ChatSession], Any]): Función a invocar con la sesión activa.
+        """
+        self._session_changed_callback = callback
 
     def on_submit(self, text: str) -> None:
         """Interpreta el evento de envío desde la vista.
@@ -76,6 +85,77 @@ class ChatDelegate:
         """
         self._model.set_model(model_name)
 
+    def on_new_session(self, title: Optional[str] = None) -> ChatSession:
+        """Inicia una nueva sesión de chat persistente.
+
+        Args:
+            title (Optional[str]): Título opcional.
+
+        Returns:
+            ChatSession: Nueva sesión creada.
+        """
+        session = self._model.new_session(title=title)
+        if self._session_changed_callback:
+            try:
+                self._session_changed_callback(session)
+            except Exception as e:
+                print(f"[ChatDelegate] Error en session_changed_callback: {e}")
+        return session
+
+    def on_session_changed(self, session_id: str) -> bool:
+        """Carga una sesión existente desde el historial local.
+
+        Args:
+            session_id (str): Identificador de la sesión.
+
+        Returns:
+            bool: True si la sesión se cargó con éxito.
+        """
+        success = self._model.load_session(session_id)
+        if success and self._session_changed_callback and self._model.current_session:
+            try:
+                self._session_changed_callback(self._model.current_session)
+            except Exception as e:
+                print(f"[ChatDelegate] Error en session_changed_callback: {e}")
+        return success
+
+    def on_delete_session(self, session_id: Optional[str] = None) -> bool:
+        """Elimina una sesión del historial y genera una nueva sesión activa.
+
+        Args:
+            session_id (Optional[str]): Identificador de la sesión a eliminar.
+
+        Returns:
+            bool: True si se eliminó con éxito.
+        """
+        sid = session_id or self._model.current_session_id
+        if not sid:
+            return False
+        is_active = (self._model.current_session_id == sid)
+        success = self._model.delete_session(sid)
+        if success and is_active:
+            sessions = self._model.sessions
+            if sessions:
+                self._model.load_session(sessions[0]["session_id"])
+            else:
+                self._model.new_session()
+            if self._session_changed_callback and self._model.current_session:
+                try:
+                    self._session_changed_callback(self._model.current_session)
+                except Exception as e:
+                    print(f"[ChatDelegate] Error en session_changed_callback: {e}")
+        return success
+
+    def on_clear_current_session(self) -> None:
+        """Limpia los mensajes de la sesión actual."""
+        self._model.clear_messages()
+        if self._session_changed_callback and self._model.current_session:
+            try:
+                self._session_changed_callback(self._model.current_session)
+            except Exception as e:
+                print(f"[ChatDelegate] Error en session_changed_callback: {e}")
+
+
 
 class ChatWindow(IChatView):
     """Ventana principal de Chat y Control del Agente en omni.ui (IChatView)."""
@@ -103,6 +183,47 @@ class ChatWindow(IChatView):
 
         self._model.subscribe(self._on_model_updated)
         self._build_ui()
+
+    @property
+    def model(self) -> ChatModel:
+        """Acceso al modelo de datos subyacente."""
+        return self._model
+
+    @property
+    def delegate(self) -> ChatDelegate:
+        """Acceso al delegado de eventos."""
+        return self._delegate
+
+    def set_session_changed_callback(self, callback: Callable[[ChatSession], Any]) -> None:
+        """Registra el callback de cambio o recarga de sesión."""
+        self._delegate.set_session_changed_callback(callback)
+
+    def rebuild_messages_ui(self) -> None:
+        """Reconstruye las burbujas visuales en el scroll frame según los mensajes del modelo."""
+        self._message_labels.clear()
+        if hasattr(self, "_messages_stack") and self._messages_stack:
+            try:
+                self._messages_stack.clear()
+            except Exception:
+                pass
+            for msg in self._model.messages:
+                self.add_message_bubble(msg.role, msg.content)
+        self._scroll_to_bottom()
+
+    def finalize_last_assistant_message(self, full_text: Optional[str] = None) -> None:
+        """Sincroniza y persiste el mensaje final del asistente en el modelo y almacenamiento local."""
+        if full_text is None and self._message_labels:
+            last_label = self._message_labels[-1]
+            if hasattr(last_label, "text"):
+                full_text = last_label.text
+
+        if full_text:
+            if (
+                not self._model.messages
+                or self._model.messages[-1].role != "assistant"
+                or self._model.messages[-1].content != full_text
+            ):
+                self._model.add_message("assistant", full_text)
 
     # --- Implementación de IChatView ---
 
@@ -151,6 +272,12 @@ class ChatWindow(IChatView):
                 # Separador horizontal
                 ui.Rectangle(height=1, style={"background_color": 0xFF333333})
 
+                # Barra de Sesiones e Historial Local
+                self._build_session_bar()
+
+                # Separador horizontal
+                ui.Rectangle(height=1, style={"background_color": 0xFF333333})
+
                 # Área principal de Scroll para el Historial de Mensajes
                 self._scrolling_frame = ui.ScrollingFrame(
                     height=ui.Fraction(1),
@@ -177,10 +304,10 @@ class ChatWindow(IChatView):
 
             ui.Spacer(width=10)
 
-            # Selector de Modelo
+            # Selector de Modelo (dinámico)
             ui.Label("Modelo:", width=55, style={"color": 0xFFCCCCCC, "font_size": 13})
-            self._model_combo = ui.ComboBox(0, *self._model.available_models, width=200, height=26)
-            self._model_combo.model.add_item_changed_fn(self._on_model_selection_changed)
+            self._model_combo_frame = ui.Frame(width=200, height=26)
+            self._rebuild_model_combo()
 
             ui.Spacer()
 
@@ -196,6 +323,89 @@ class ChatWindow(IChatView):
                         alignment=ui.Alignment.CENTER,
                         style={"color": 0xFFFFFFFF, "font_size": 12, "font_weight": "bold"}
                     )
+
+    def _rebuild_model_combo(self) -> None:
+        """Reconstruye el selector de modelos según el proveedor activo."""
+        if not hasattr(self, "_model_combo_frame") or not self._model_combo_frame:
+            return
+
+        models = self._model.available_models
+        current_model = self._model.current_model
+        active_idx = 0
+        for idx, m in enumerate(models):
+            if m == current_model:
+                active_idx = idx
+                break
+
+        self._is_updating_model_combo = True
+        try:
+            self._model_combo_frame.clear()
+            with self._model_combo_frame:
+                self._model_combo = ui.ComboBox(active_idx, *models, width=200, height=26)
+                self._model_combo.model.add_item_changed_fn(self._on_model_selection_changed)
+        finally:
+            self._is_updating_model_combo = False
+
+    def _build_session_bar(self) -> None:
+        """Renderiza la barra de control de sesiones y selector de historial local."""
+        with ui.HStack(height=36, style={"background_color": 0xFF222222}, padding=6, spacing=8):
+            ui.Label("Historial:", width=55, style={"color": 0xFFCCCCCC, "font_size": 12, "font_weight": "bold"})
+
+            self._session_combo_frame = ui.Frame(width=ui.Fraction(1), height=24)
+            self._rebuild_session_combo()
+
+            self._new_session_btn = ui.Button(
+                "+ Nuevo",
+                width=68,
+                height=24,
+                style={"background_color": 0xFF007ACC, "border_radius": 4, "font_size": 11},
+                clicked_fn=self._handle_new_session_clicked,
+            )
+
+            self._delete_session_btn = ui.Button(
+                "Eliminar",
+                width=62,
+                height=24,
+                style={"background_color": 0xFF883333, "border_radius": 4, "font_size": 11},
+                clicked_fn=self._handle_delete_session_clicked,
+            )
+
+            self._clear_session_btn = ui.Button(
+                "Limpiar",
+                width=58,
+                height=24,
+                style={"background_color": 0xFF444444, "border_radius": 4, "font_size": 11},
+                clicked_fn=self._handle_clear_session_clicked,
+            )
+
+    def _rebuild_session_combo(self) -> None:
+        """Reconstruye el ComboBox de sesiones con los títulos y conteo actualizados."""
+        if not hasattr(self, "_session_combo_frame") or not self._session_combo_frame:
+            return
+
+        sessions = self._model.sessions
+        current_id = self._model.current_session_id
+        active_idx = 0
+
+        session_titles: List[str] = []
+        if not sessions:
+            session_titles = ["(Nueva Conversación)"]
+        else:
+            for idx, s in enumerate(sessions):
+                title = s.get("title", "Conversación")
+                count = s.get("message_count", 0)
+                session_titles.append(f"{title} ({count})")
+                if s.get("session_id") == current_id:
+                    active_idx = idx
+
+        self._is_updating_session_combo = True
+        try:
+            self._session_combo_frame.clear()
+            with self._session_combo_frame:
+                self._session_combo = ui.ComboBox(active_idx, *session_titles, width=ui.Fraction(1), height=24)
+                self._session_combo.model.add_item_changed_fn(self._on_session_selection_changed)
+        finally:
+            self._is_updating_session_combo = False
 
     def _build_input_area(self) -> None:
         """Renderiza la zona de entrada multilínea con atajo Ctrl + Enter y botón Enviar."""
@@ -228,23 +438,29 @@ class ChatWindow(IChatView):
 
     def _on_provider_selection_changed(self, item_model, item) -> None:
         """Maneja el cambio en el selector desplegable de proveedores."""
+        if getattr(self, "_is_updating_provider_combo", False):
+            return
         try:
             val_idx = item_model.get_item_value_model().as_int
             providers = self._model.providers
             if 0 <= val_idx < len(providers):
                 new_provider = providers[val_idx]
-                self._delegate.on_provider_changed(new_provider)
+                if new_provider != self._model.current_provider:
+                    self._delegate.on_provider_changed(new_provider)
         except Exception:
             pass
 
     def _on_model_selection_changed(self, item_model, item) -> None:
         """Maneja el cambio en el selector desplegable de modelos."""
+        if getattr(self, "_is_updating_model_combo", False):
+            return
         try:
             val_idx = item_model.get_item_value_model().as_int
             models = self._model.available_models
             if 0 <= val_idx < len(models):
                 new_model = models[val_idx]
-                self._delegate.on_model_changed(new_model)
+                if new_model != self._model.current_model:
+                    self._delegate.on_model_changed(new_model)
         except Exception:
             pass
 
@@ -262,9 +478,41 @@ class ChatWindow(IChatView):
             self._input_field.model.set_value("")
             self._delegate.on_submit(prompt)
 
+    def _handle_new_session_clicked(self) -> None:
+        """Acción para iniciar una nueva sesión de chat limpia."""
+        self._delegate.on_new_session()
+        self.rebuild_messages_ui()
+
+    def _handle_delete_session_clicked(self) -> None:
+        """Acción para eliminar la sesión de chat actual."""
+        self._delegate.on_delete_session()
+        self.rebuild_messages_ui()
+
+    def _handle_clear_session_clicked(self) -> None:
+        """Acción para limpiar los mensajes de la sesión actual."""
+        self._delegate.on_clear_current_session()
+        self.rebuild_messages_ui()
+
+    def _on_session_selection_changed(self, item_model, item) -> None:
+        """Maneja la selección de una sesión en el desplegable de historial."""
+        if getattr(self, "_is_updating_session_combo", False):
+            return
+        try:
+            val_idx = item_model.get_item_value_model().as_int
+            sessions = self._model.sessions
+            if 0 <= val_idx < len(sessions):
+                target_id = sessions[val_idx]["session_id"]
+                if target_id != self._model.current_session_id:
+                    self._delegate.on_session_changed(target_id)
+                    self.rebuild_messages_ui()
+        except Exception:
+            pass
+
     def _on_model_updated(self) -> None:
         """Notificación cuando el modelo subyacente cambia de estado."""
         self._update_status_badge_ui(self._model.status, self._model.is_loading)
+        self._rebuild_session_combo()
+        self._rebuild_model_combo()
 
     def _update_status_badge_ui(self, status: str, is_loading: bool) -> None:
         """Actualiza los estilos visuales del badge de estado en el hilo principal."""

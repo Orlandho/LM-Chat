@@ -107,6 +107,12 @@ for mod_name in base_modules:
             setattr(sys.modules[parent_name], child_name, sys.modules[mod_name])
 
 # Configurar funciones mock específicas para omni.lm_chat y retrocompatibilidad con test_hello_world
+class MockIExt:
+    pass
+
+if 'omni.ext' in sys.modules:
+    setattr(sys.modules['omni.ext'], 'IExt', MockIExt)
+
 lm_chat_mod = sys.modules['omni.lm_chat']
 lm_chat_mod.some_public_function = lambda x: x ** 4
 

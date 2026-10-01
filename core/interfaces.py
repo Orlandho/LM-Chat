@@ -6,6 +6,8 @@ Contratos e interfaces fundamentales de la suite LM-Chat™.
 Diseñados para permitir el desarrollo concurrente y desacoplado por el Enjambre de Jules.
 """
 
+import uuid
+from datetime import datetime, timezone
 from abc import ABC, abstractmethod
 from typing import Dict, Any, List, Optional, AsyncIterator, Callable
 from dataclasses import dataclass
@@ -15,6 +17,98 @@ class ChatMessage:
     role: str  # "system", "user", "assistant"
     content: str
     metadata: Optional[Dict[str, Any]] = None
+
+@dataclass
+class ChatSession:
+    """Representa una sesión de chat persistente con sus mensajes y metadatos."""
+    session_id: str
+    title: str
+    created_at: str
+    updated_at: str
+    messages: List[ChatMessage]
+    metadata: Optional[Dict[str, Any]] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serializa la sesión a un diccionario nativo JSON-compatible."""
+        serialized_messages: List[Dict[str, Any]] = []
+        for m in self.messages:
+            if isinstance(m, ChatMessage):
+                serialized_messages.append({
+                    "role": m.role,
+                    "content": m.content,
+                    "metadata": m.metadata or {},
+                })
+            elif isinstance(m, dict):
+                serialized_messages.append({
+                    "role": m.get("role", "user"),
+                    "content": m.get("content", ""),
+                    "metadata": m.get("metadata") or {},
+                })
+            else:
+                serialized_messages.append({
+                    "role": getattr(m, "role", "user"),
+                    "content": str(getattr(m, "content", m)),
+                    "metadata": getattr(m, "metadata", {}) or {},
+                })
+
+        return {
+            "session_id": self.session_id,
+            "title": self.title,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+            "messages": serialized_messages,
+            "metadata": self.metadata or {},
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ChatSession":
+        """Instancia un ChatSession a partir de un diccionario."""
+        now_iso = datetime.now(timezone.utc).isoformat()
+        if not isinstance(data, dict):
+            return cls(
+                session_id=uuid.uuid4().hex,
+                title="Nueva Conversación",
+                created_at=now_iso,
+                updated_at=now_iso,
+                messages=[],
+                metadata={},
+            )
+
+        raw_msgs = data.get("messages")
+        if not isinstance(raw_msgs, list):
+            raw_msgs = []
+
+        msgs: List[ChatMessage] = []
+        for m in raw_msgs:
+            if isinstance(m, ChatMessage):
+                msgs.append(m)
+            elif isinstance(m, dict):
+                msgs.append(
+                    ChatMessage(
+                        role=m.get("role", "user"),
+                        content=m.get("content", ""),
+                        metadata=m.get("metadata"),
+                    )
+                )
+            elif isinstance(m, str):
+                msgs.append(ChatMessage(role="user", content=m))
+
+        sid = data.get("session_id") or uuid.uuid4().hex
+        created = data.get("created_at") or now_iso
+        updated = data.get("updated_at") or created
+        title = data.get("title") or "Nueva Conversación"
+        metadata = data.get("metadata")
+        if not isinstance(metadata, dict):
+            metadata = {}
+
+        return cls(
+            session_id=sid,
+            title=title,
+            created_at=created,
+            updated_at=updated,
+            messages=msgs,
+            metadata=metadata,
+        )
 
 @dataclass
 class InferenceConfig:
@@ -95,3 +189,55 @@ class IChatView(ABC):
     def update_status(self, status: str, is_loading: bool = False) -> None:
         """Actualiza el badge de estado en la UI."""
         pass
+
+
+class IChatHistoryManager(ABC):
+    """Contrato para el gestor de persistencia e historial de chats locales."""
+
+    @abstractmethod
+    def create_session(
+        self, title: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None
+    ) -> ChatSession:
+        """Crea e inicializa una nueva sesión de chat persistente."""
+        pass
+
+    @abstractmethod
+    def get_session(self, session_id: str) -> Optional[ChatSession]:
+        """Recupera una sesión existente por su identificador único."""
+        pass
+
+    @abstractmethod
+    def list_sessions(self) -> List[Dict[str, Any]]:
+        """Lista los metadatos resumidos de todas las sesiones ordenadas por fecha de actualización."""
+        pass
+
+    @abstractmethod
+    def save_session(self, session: ChatSession) -> bool:
+        """Persiste una sesión en el almacenamiento local de forma atómica."""
+        pass
+
+    @abstractmethod
+    def delete_session(self, session_id: str) -> bool:
+        """Elimina una sesión del almacenamiento local."""
+        pass
+
+    @abstractmethod
+    def clear_all_sessions(self) -> bool:
+        """Elimina todas las sesiones almacenadas localmente."""
+        pass
+
+    @abstractmethod
+    def search_sessions(self, query: str) -> List[Dict[str, Any]]:
+        """Busca sesiones que coincidan en título o contenido de mensajes."""
+        pass
+
+    @abstractmethod
+    def export_session_json(self, session_id: str) -> Optional[str]:
+        """Exporta una sesión a formato JSON como string."""
+        pass
+
+    @abstractmethod
+    def import_session_json(self, json_content: str) -> Optional[ChatSession]:
+        """Importa una sesión desde una cadena JSON y la persiste localmente."""
+        pass
+

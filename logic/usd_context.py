@@ -8,8 +8,16 @@ Spatial USD Context Manager for converting OpenUSD Stage hierarchy to JSON conte
 import json
 import logging
 from typing import Dict, Any, List, Optional
-import omni.usd
-from pxr import Usd, UsdGeom, UsdShade, Sdf, Gf
+try:
+    import omni.usd
+    from pxr import Usd, UsdGeom, UsdShade, Sdf, Gf
+except ImportError:
+    omni = None
+    Usd = None
+    UsdGeom = None
+    UsdShade = None
+    Sdf = None
+    Gf = None
 from core.interfaces import IStageContextSerializer
 
 logger = logging.getLogger(__name__)
