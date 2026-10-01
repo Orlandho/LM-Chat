@@ -100,3 +100,20 @@ In `.github/workflows/release.yml`, releases automatically build a zip archive w
 For multi-agent swarms operating within this repository:
 - **No Agent Works Alone:** Always collaborate, review, and validate with peer agents (e.g. Supervisor, Atenea, Hermes, Jules).
 - **Mutual Responsibility:** Double-check configurations, respect host security rules (e.g. Bitdefender Total Security safe practices, no port scans or chained remote PowerShell bursts), and preserve workspace integrity.
+
+---
+
+## 🌐 7. Universal Invariant: Zero Outdated Knowledge & Mandatory Pre-Flight Research
+
+To guarantee that `LM-Chat™` remains permanently at the cutting edge of Spatial and Generative AI, **all contributors (AI and human) are strictly bound to this invariant**:
+
+1. **Strict Prohibition of Static / Parametric Assumptions:**
+   - Never assume that LLM model catalogs, API parameters, inference endpoints, library versions, or hardware microservices remain unchanged.
+   - Any agent proposing models, endpoints, or capabilities based purely on static memory without live verification is committing an architectural violation.
+
+2. **Mandatory Pre-Flight Research (`search_web` & Live Discovery):**
+   - Before drafting implementation plans, modifying provider catalogs, or implementing protocol handlers, agents **MUST** execute live web searches (`search_web`) or query upstream official API endpoints (`/v1/models`, `/api/tags`, official docs) to verify the actual state of the art (e.g., current frontier lineages: OpenAI GPT-6 Astra/Sol/Luna, Anthropic Claude Opus 5.5 / Fable 5.1 / Sonnet 5.5, Google Gemini 3.8 / 3.7 Flash, NVIDIA Nemotron 3.5 / Cosmos 3, DeepSeek V4/R1, Qwen 3.6, Llama 4).
+
+3. **Software Architecture Invariant (Dynamic Self-Updating Systems):**
+   - All client software developed in this repository must implement active discovery mechanisms (`fetch_remote_models`, dynamic `/v1/models` querying, and live GUI refresh buttons) so that end users and autonomous agents never depend on hardcoded legacy lists.
+

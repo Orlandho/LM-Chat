@@ -29,7 +29,7 @@ class TestSettingsManager(unittest.IsolatedAsyncioTestCase):
     def test_default_initialization(self):
         """Verifica los valores de inicialización por defecto."""
         self.assertEqual(self.manager.get_default_provider(), "LM Studio")
-        self.assertEqual(self.manager.get_default_model("LM Studio"), "deepseek-r1-distill-qwen-14b")
+        self.assertEqual(self.manager.get_default_model("LM Studio"), "deepseek-v4")
         providers = self.manager.get_all_providers()
         self.assertIn("LM Studio", providers)
         self.assertIn("Ollama", providers)

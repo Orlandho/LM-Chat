@@ -36,7 +36,7 @@ class TestSettingsWindow(unittest.TestCase):
         )
         self.assertIsNotNone(window.window)
         self.assertEqual(window.selected_provider, "LM Studio")
-        self.assertEqual(window.selected_model, "deepseek-r1-distill-qwen-14b")
+        self.assertEqual(window.selected_model, "deepseek-v4")
 
     def test_provider_change_updates_selected_provider_and_model(self):
         """Verifica que cambiar de proveedor actualice el proveedor y modelo seleccionados."""
