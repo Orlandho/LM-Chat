@@ -1,8 +1,15 @@
 # -*- coding: utf-8 -*-
 
-import omni.ext
-import pxr
-from pxr import Usd, UsdGeom, Gf
+try:
+    import omni.ext
+    import pxr
+    from pxr import Usd, UsdGeom, Gf
+except ImportError:
+    omni = None
+    pxr = None
+    Usd = None
+    UsdGeom = None
+    Gf = None
 
 class USDController:
     """Handles execution of dynamic USD python code."""
@@ -33,7 +40,7 @@ class USDController:
 
         # Prepare execution environment
         exec_globals = {
-            "omni": __import__('omni'),
+            "omni": __import__('omni') if omni is not None else None,
             "pxr": pxr,
             "Usd": Usd,
             "UsdGeom": UsdGeom,

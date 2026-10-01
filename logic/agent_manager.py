@@ -80,6 +80,33 @@ class AgentManager:
             provider=provider, base_url=base_url, model=model, api_key=api_key
         )
 
+    def load_session_messages(self, messages: List[Any]) -> None:
+        """Sincroniza el contexto conversacional del LLM con una sesión cargada.
+
+        Args:
+            messages (List[Any]): Lista de ChatMessage o diccionarios con rol y contenido.
+        """
+        self._messages = [{"role": "system", "content": self._system_prompt}]
+        for msg in messages:
+            if hasattr(msg, "role") and hasattr(msg, "content"):
+                role = msg.role
+                content = msg.content
+            elif isinstance(msg, dict):
+                role = msg.get("role", "user")
+                content = msg.get("content", "")
+            else:
+                continue
+
+            if role in ("user", "assistant"):
+                self._messages.append({"role": role, "content": content})
+            elif role == "system" and content and content != self._system_prompt:
+                self._messages[0]["content"] = content
+
+    def reset_conversation(self) -> None:
+        """Reinicia el contexto de conversación reteniendo el system prompt."""
+        self._messages = [{"role": "system", "content": self._system_prompt}]
+
+
     async def process_prompt(
         self,
         prompt: str,
