@@ -310,3 +310,33 @@ class TestLocalChatHistoryManager:
         res_model = mgr.search_sessions("nemotron")
         assert len(res_model) == 1
         assert res_model[0]["session_id"] == s1.session_id
+
+    def test_import_session_json_security_validation(self, tmp_path):
+        mgr = LocalChatHistoryManager(storage_dir=str(tmp_path))
+
+        # Test non-string and empty inputs
+        assert mgr.import_session_json(None) is None
+        assert mgr.import_session_json(12345) is None
+        assert mgr.import_session_json("") is None
+        assert mgr.import_session_json("   ") is None
+
+        # Test oversized payload (>10MB)
+        oversized_payload = '{"title": "' + "a" * 10_000_001 + '"}'
+        assert mgr.import_session_json(oversized_payload) is None
+
+        # Test import with non-string session_id in payload
+        payload_invalid_sid = json.dumps({"session_id": 99999, "title": "Invalid SID Type"})
+        session = mgr.import_session_json(payload_invalid_sid)
+        assert session is not None
+        assert isinstance(session.session_id, str)
+        assert session.session_id != 99999
+
+    def test_session_id_type_validation(self, tmp_path):
+        mgr = LocalChatHistoryManager(storage_dir=str(tmp_path))
+
+        assert mgr.get_session(None) is None
+        assert mgr.get_session(12345) is None
+        assert mgr.delete_session(None) is False
+        assert mgr.delete_session(12345) is False
+        assert mgr.export_session_json(None) is None
+        assert mgr.export_session_json(12345) is None
