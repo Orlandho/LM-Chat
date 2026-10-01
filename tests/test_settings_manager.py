@@ -29,7 +29,7 @@ class TestSettingsManager(unittest.IsolatedAsyncioTestCase):
     def test_default_initialization(self):
         """Verifica los valores de inicialización por defecto."""
         self.assertEqual(self.manager.get_default_provider(), "LM Studio")
-        self.assertEqual(self.manager.get_default_model("LM Studio"), "local-model")
+        self.assertEqual(self.manager.get_default_model("LM Studio"), "deepseek-r1-distill-qwen-14b")
         providers = self.manager.get_all_providers()
         self.assertIn("LM Studio", providers)
         self.assertIn("Ollama", providers)
@@ -53,7 +53,8 @@ class TestSettingsManager(unittest.IsolatedAsyncioTestCase):
         """Verifica que cambiar el proveedor predeterminado persista en disco."""
         self.manager.set_default_provider("Claude API")
         self.assertEqual(self.manager.get_default_provider(), "Claude API")
-        self.assertEqual(self.manager.get_default_model("Claude API"), "claude-3-7-sonnet-latest")
+        self.assertEqual(self.manager.get_default_model("Claude API"), "claude-opus-5-5-latest")
+
 
         # Recargar desde el archivo físico
         reloaded = SettingsManager(config_path=self.config_file)
@@ -165,6 +166,52 @@ class TestSettingsManager(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(res["success"])
         self.assertIn("inválida", res["message"].lower())
 
+    @patch("aiohttp.ClientSession.get")
+    async def test_fetch_remote_models_openai_compat(self, mock_get):
+        """Verifica descubrimiento dinámico en endpoint compatible con OpenAI /models."""
+        mock_response = AsyncMock()
+        mock_response.status = 200
+        mock_response.json = AsyncMock(return_value={
+            "data": [
+                {"id": "gpt-6-astra"},
+                {"id": "gpt-6.1-sol"},
+                {"id": "gpt-6-luna"},
+            ]
+        })
+        mock_get.return_value.__aenter__.return_value = mock_response
+
+        models = await self.manager.fetch_remote_models("OpenAI API")
+        self.assertIn("gpt-6-astra", models)
+        self.assertIn("gpt-6.1-sol", models)
+        self.assertIn("gpt-6-luna", models)
+
+    @patch("aiohttp.ClientSession.get")
+    async def test_fetch_remote_models_ollama_tags(self, mock_get):
+        """Verifica descubrimiento dinámico en endpoint Ollama /api/tags."""
+        mock_response = AsyncMock()
+        mock_response.status = 200
+        mock_response.json = AsyncMock(return_value={
+            "models": [
+                {"name": "deepseek-r1:8b"},
+                {"name": "deepseek-r1:14b"},
+            ]
+        })
+        mock_get.return_value.__aenter__.return_value = mock_response
+
+        models = await self.manager.fetch_remote_models("Ollama")
+        self.assertIn("deepseek-r1:8b", models)
+        self.assertIn("deepseek-r1:14b", models)
+
+    @patch("aiohttp.ClientSession.get")
+    async def test_fetch_remote_models_error_fallback(self, mock_get):
+        """Verifica que si la red falla, retorna los modelos existentes sin propagar excepción."""
+        mock_get.side_effect = Exception("Conexión rechazada")
+
+        models = await self.manager.fetch_remote_models("LM Studio")
+        self.assertIsInstance(models, list)
+        self.assertTrue(len(models) > 0)
+
 
 if __name__ == "__main__":
     unittest.main()
+

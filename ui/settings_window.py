@@ -147,8 +147,21 @@ class SettingsWindow:
                             style={"font_size": 13, "font_weight": "bold", "color": 0xFFE0E0E0},
                         )
                         with ui.HStack(height=28, spacing=8):
-                            self._model_combo_frame = ui.Frame(width=300, height=28)
+                            self._model_combo_frame = ui.Frame(width=280, height=28)
                             self._rebuild_model_combo()
+
+                            self._discover_models_btn = ui.Button(
+                                "🔄 Descubrir en Vivo",
+                                width=150,
+                                height=28,
+                                style={"background_color": 0xFF007ACC, "border_radius": 4, "font_size": 11},
+                                clicked_fn=self._on_discover_models_clicked,
+                            )
+                            self._discover_status_label = ui.Label(
+                                "",
+                                style={"color": 0xFF4CAF50, "font_size": 11, "font_weight": "bold"},
+                                width=ui.Fraction(1),
+                            )
 
                         # Campo para modelo personalizado
                         with ui.HStack(height=26, spacing=8):
@@ -481,3 +494,35 @@ class SettingsWindow:
         if hasattr(self, "_action_status_label"):
             self._action_status_label.text = "Valores de fábrica restablecidos."
         self._build_ui()
+
+    def _on_discover_models_clicked(self) -> None:
+        """Consulta asíncronamente los modelos vivos disponibles en el servidor seleccionado."""
+        if hasattr(self, "_discover_status_label") and self._discover_status_label:
+            self._discover_status_label.text = "Consultando modelos en vivo..."
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_closed():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            loop.create_task(self._discover_models_async())
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.create_task(self._discover_models_async())
+
+
+    async def _discover_models_async(self) -> None:
+        """Tarea asíncrona de fondo para descubrir modelos sin bloquear la UI de Omniverse."""
+        try:
+            prov = self._selected_provider
+            models = await self._settings_manager.fetch_remote_models(prov)
+            self._rebuild_model_combo()
+            if hasattr(self, "_discover_status_label") and self._discover_status_label:
+                if models:
+                    self._discover_status_label.text = f"✓ {len(models)} modelos vivos"
+                else:
+                    self._discover_status_label.text = "Sin modelos nuevos detectados"
+        except Exception as e:
+            if hasattr(self, "_discover_status_label") and self._discover_status_label:
+                self._discover_status_label.text = f"Fallo al descubrir: {e}"
+

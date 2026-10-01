@@ -40,16 +40,15 @@ class SettingsManager(ISettingsManager):
             "name": "LM Studio",
             "provider_key": "lm_studio",
             "base_url": "http://localhost:1234/v1",
-            "default_model": "local-model",
+            "default_model": "deepseek-r1-distill-qwen-14b",
             "available_models": [
-                "local-model",
+                "deepseek-r1-distill-qwen-14b",
+                "deepseek-r1-distill-qwen-32b",
                 "qwen2.5-coder-7b",
                 "qwen2.5-coder-14b",
                 "qwen2.5-coder-32b",
-                "deepseek-r1-distill-qwen-14b",
-                "deepseek-r1-distill-qwen-32b",
-                "llama-3.2-3b-instruct",
                 "llama-3.3-70b-instruct",
+                "local-model",
             ],
             "api_key": "",
             "env_key": None,
@@ -65,17 +64,16 @@ class SettingsManager(ISettingsManager):
             "name": "Ollama",
             "provider_key": "ollama",
             "base_url": "http://localhost:11434/v1",
-            "default_model": "llama3:latest",
+            "default_model": "deepseek-r1:8b",
             "available_models": [
-                "llama3:latest",
-                "llama3.3:latest",
-                "llama3.1:8b",
-                "qwen2.5-coder:7b",
-                "qwen2.5-coder:14b",
-                "qwen2.5-coder:32b",
                 "deepseek-r1:8b",
                 "deepseek-r1:14b",
                 "deepseek-r1:32b",
+                "qwen2.5-coder:7b",
+                "qwen2.5-coder:14b",
+                "qwen2.5-coder:32b",
+                "llama3.3:latest",
+                "llama3:latest",
                 "codellama:7b",
                 "mistral:latest",
             ],
@@ -93,15 +91,16 @@ class SettingsManager(ISettingsManager):
             "name": "OpenAI API",
             "provider_key": "openai",
             "base_url": "https://api.openai.com/v1",
-            "default_model": "gpt-4o",
+            "default_model": "gpt-6-astra",
             "available_models": [
+                "gpt-6-astra",
+                "gpt-6.1-sol",
+                "gpt-6-luna",
+                "gpt-5",
+                "o3-mini",
                 "gpt-4o",
                 "gpt-4o-mini",
-                "o3-mini",
-                "o1",
-                "o1-mini",
                 "gpt-4.5-preview",
-                "gpt-4-turbo",
             ],
             "api_key": "",
             "env_key": "OPENAI_API_KEY",
@@ -116,12 +115,14 @@ class SettingsManager(ISettingsManager):
             "name": "Claude API",
             "provider_key": "claude",
             "base_url": "https://api.anthropic.com/v1",
-            "default_model": "claude-3-7-sonnet-latest",
+            "default_model": "claude-opus-5-5-latest",
             "available_models": [
+                "claude-opus-5-5-latest",
+                "claude-fable-5-1",
+                "claude-sonnet-5-5",
+                "claude-haiku-4-5",
                 "claude-3-7-sonnet-latest",
                 "claude-3-5-sonnet-latest",
-                "claude-3-5-haiku-latest",
-                "claude-3-5-opus-latest",
                 "claude-3-opus-latest",
             ],
             "api_key": "",
@@ -137,14 +138,14 @@ class SettingsManager(ISettingsManager):
             "name": "NVIDIA Spark",
             "provider_key": "nvidia_spark",
             "base_url": "https://integrate.api.nvidia.com/v1",
-            "default_model": "nvidia/llama-3.1-nemotron-70b-instruct",
+            "default_model": "nvidia/nemotron-3.5-lightning",
             "available_models": [
+                "nvidia/nemotron-3.5-lightning",
+                "nvidia/cosmos-3",
+                "nvidia/nemotron-3-ultra-550b",
                 "nvidia/llama-3.1-nemotron-70b-instruct",
-                "meta/llama-3.1-70b-instruct",
-                "meta/llama-3.1-405b-instruct",
-                "nvidia/nemotron-4-340b-instruct",
-                "mistralai/mixtral-8x22b-instruct-v0.1",
                 "deepseek-ai/deepseek-r1",
+                "meta/llama-3.1-405b-instruct",
             ],
             "api_key": "",
             "env_key": "NVIDIA_API_KEY",
@@ -177,6 +178,7 @@ class SettingsManager(ISettingsManager):
             ],
         },
     }
+
 
     # Alias y compatibilidad con configuraciones previas
     PROVIDER_ALIASES: Dict[str, str] = {
@@ -584,3 +586,75 @@ class SettingsManager(ISettingsManager):
                 "error_type": type(e).__name__,
                 "diagnostic": diag,
             }
+
+    async def fetch_remote_models(self, provider_name: str) -> List[str]:
+        """Consulta en tiempo real el endpoint del proveedor (/v1/models o /api/tags) y retorna los modelos vivos disponibles."""
+        canonical_name = self._canonicalize_provider_name(provider_name)
+        cfg = self.get_provider_config(canonical_name)
+        base_url = cfg.get("base_url", "").rstrip("/")
+        api_key = self.get_effective_api_key(canonical_name)
+        provider_key = cfg.get("provider_key", canonical_name.lower())
+
+        discovered_models: List[str] = []
+        timeout = aiohttp.ClientTimeout(total=8.0)
+
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                headers = {"Content-Type": "application/json"}
+                if api_key:
+                    clean_key = api_key.strip().replace("\r", "").replace("\n", "")
+                    if provider_key == "claude" or "anthropic" in base_url:
+                        headers["x-api-key"] = clean_key
+                        headers["anthropic-version"] = "2023-06-01"
+                    else:
+                        headers["Authorization"] = f"Bearer {clean_key}"
+
+                # Try endpoint according to provider
+                if provider_key == "ollama" or "11434" in base_url:
+                    try:
+                        clean_root = base_url[:-3] if base_url.endswith("/v1") else base_url
+                        async with session.get(f"{clean_root}/api/tags") as resp:
+                            if resp.status == 200:
+                                data = await resp.json()
+                                for m in data.get("models", []):
+                                    name = m.get("name") or m.get("model")
+                                    if name and name not in discovered_models:
+                                        discovered_models.append(name)
+                    except Exception:
+                        pass
+
+                # Standard /models endpoint (OpenAI, LM Studio, NVIDIA, vLLM, Gemini, or Ollama /v1/models)
+                if not discovered_models:
+                    url = f"{base_url}/models"
+                    async with session.get(url, headers=headers) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            items = data.get("data", []) if isinstance(data, dict) else []
+                            if not items and isinstance(data, list):
+                                items = data
+                            for item in items:
+                                if isinstance(item, dict):
+                                    mid = item.get("id") or item.get("name")
+                                    if mid and mid not in discovered_models:
+                                        discovered_models.append(mid)
+
+        except Exception as e:
+            logger.warning(f"Error descubriendo modelos en vivo para {provider_name}: {e}")
+
+        if discovered_models:
+            # Merge with existing models preserving new ones at top
+            existing = cfg.get("available_models", [])
+            merged = discovered_models.copy()
+            for m in existing:
+                if m not in merged:
+                    merged.append(m)
+            cfg["available_models"] = merged
+            if "providers" in self._settings_data and canonical_name in self._settings_data["providers"]:
+                self._settings_data["providers"][canonical_name]["available_models"] = merged
+            self.save()
+            logger.info(f"Descubiertos {len(discovered_models)} modelos en vivo para {provider_name}")
+            return merged
+
+
+        return cfg.get("available_models", [])
+

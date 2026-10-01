@@ -320,4 +320,9 @@ class ISettingsManager(ABC):
         """Restablece la configuración a los valores de fábrica."""
         pass
 
+    @abstractmethod
+    async def fetch_remote_models(self, provider_name: str) -> List[str]:
+        """Consulta en tiempo real el endpoint del proveedor (/v1/models o /api/tags) y retorna los modelos vivos disponibles."""
+        pass
+
 

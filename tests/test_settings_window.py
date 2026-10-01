@@ -36,7 +36,7 @@ class TestSettingsWindow(unittest.TestCase):
         )
         self.assertIsNotNone(window.window)
         self.assertEqual(window.selected_provider, "LM Studio")
-        self.assertEqual(window.selected_model, "local-model")
+        self.assertEqual(window.selected_model, "deepseek-r1-distill-qwen-14b")
 
     def test_provider_change_updates_selected_provider_and_model(self):
         """Verifica que cambiar de proveedor actualice el proveedor y modelo seleccionados."""
@@ -51,7 +51,8 @@ class TestSettingsWindow(unittest.TestCase):
 
         window._on_provider_changed(item_model_mock, None)
         self.assertEqual(window.selected_provider, "OpenAI API")
-        self.assertEqual(window.selected_model, "gpt-4o")
+        self.assertEqual(window.selected_model, "gpt-6-astra")
+
 
     def test_set_as_default_button_persists(self):
         """Verifica que el botón de fijar como predeterminado actualice el SettingsManager."""
@@ -132,6 +133,18 @@ class TestSettingsWindow(unittest.TestCase):
 
         chat_window.destroy()
 
+    def test_discover_models_button_and_async_callback(self):
+        """Verifica que SettingsWindow incluya el botón de descubrimiento y ejecute la tarea."""
+        window = SettingsWindow(settings_manager=self.settings_manager)
+        self.assertTrue(hasattr(window, "_discover_models_btn"))
+        self.assertIsNotNone(window._discover_models_btn)
+
+        window._on_discover_models_clicked()
+        self.assertIn("Consultando", window._discover_status_label.text)
+
+        window.destroy()
+
 
 if __name__ == "__main__":
     unittest.main()
+
