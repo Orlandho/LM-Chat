@@ -79,7 +79,18 @@ class TestSettingsWindow(unittest.TestCase):
         cfg = self.settings_manager.get_provider_config("NVIDIA Spark")
         self.assertEqual(cfg["api_key"], "nvapi-save-test")
         self.assertEqual(cfg["default_model"], "meta/llama-3.1-405b-instruct")
+        self.assertEqual(self.settings_manager.get_default_provider(), "NVIDIA Spark")
         save_cb.assert_called_once_with("NVIDIA Spark", "meta/llama-3.1-405b-instruct")
+
+    def test_set_provider_respects_settings_manager_default_model(self):
+        """Verifica que ChatModel.set_provider respete el modelo por defecto configurado en SettingsManager."""
+        self.settings_manager.set_default_model("OpenAI API", "o3-mini")
+        chat_model = ChatModel(settings_manager=self.settings_manager)
+
+        # Cambiar de proveedor en el modelo
+        chat_model.set_provider("OpenAI API")
+        self.assertEqual(chat_model.current_provider, "OpenAI API")
+        self.assertEqual(chat_model.current_model, "o3-mini")
 
     def test_show_hide_destroy_lifecycle(self):
         """Verifica el ciclo de vida de visualización y destrucción."""

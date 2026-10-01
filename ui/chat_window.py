@@ -565,6 +565,7 @@ class ChatWindow(IChatView):
         """Notificación cuando el modelo subyacente cambia de estado."""
         self._update_status_badge_ui(self._model.status, self._model.is_loading)
         self._rebuild_session_combo()
+        self._rebuild_provider_combo()
         self._rebuild_model_combo()
 
     def _update_status_badge_ui(self, status: str, is_loading: bool) -> None:

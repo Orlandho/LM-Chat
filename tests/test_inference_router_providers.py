@@ -150,6 +150,32 @@ class TestInferenceRouterNewProviders(unittest.IsolatedAsyncioTestCase):
             router_nvidia = InferenceRouter(provider="nvidia_spark")
             self.assertEqual(router_nvidia.get_headers()["Authorization"], "Bearer nvapi-env-nvidia")
 
+    @patch("aiohttp.ClientSession.post")
+    async def test_sse_streaming_without_space_after_colon(self, mock_post):
+        """Verifica que el router parsee correctamente streams SSE donde data: no tiene espacio posterior."""
+        async def mock_sse_stream():
+            events = [
+                b'data:{"choices":[{"delta":{"content":"NVIDIA"}}]}\n',
+                b'data:{"choices":[{"delta":{"content":" Spark"}}]}\n',
+                b'data:[DONE]\n',
+            ]
+            for e in events:
+                yield e
+
+        mock_response = AsyncMock()
+        mock_response.status = 200
+        mock_response.content = mock_sse_stream()
+        mock_post.return_value.__aenter__.return_value = mock_response
+
+        router = InferenceRouter(provider="nvidia_spark", api_key="test-key")
+        chunks = []
+        async for chunk in router.stream_chat_completions([{"role": "user", "content": "Hola"}]):
+            chunks.append(chunk)
+
+        self.assertEqual(len(chunks), 2)
+        self.assertEqual(chunks[0]["data"]["choices"][0]["delta"]["content"], "NVIDIA")
+        self.assertEqual(chunks[1]["data"]["choices"][0]["delta"]["content"], " Spark")
+
 
 if __name__ == "__main__":
     unittest.main()

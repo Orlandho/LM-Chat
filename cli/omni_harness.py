@@ -266,11 +266,12 @@ class LMChatCLI:
         sessions = self.history_manager.list_sessions()
         target_id: Optional[str] = None
 
-        if clean_id.isdigit():
+        if clean_id.isdigit() and len(clean_id) < 6:
             idx = int(clean_id) - 1
             if 0 <= idx < len(sessions):
                 target_id = sessions[idx]["session_id"]
-        else:
+
+        if not target_id:
             for s in sessions:
                 if s["session_id"].startswith(clean_id):
                     target_id = s["session_id"]
@@ -318,11 +319,12 @@ class LMChatCLI:
         sessions = self.history_manager.list_sessions()
         target_id: Optional[str] = None
 
-        if clean_id.isdigit():
+        if clean_id.isdigit() and len(clean_id) < 6:
             idx = int(clean_id) - 1
             if 0 <= idx < len(sessions):
                 target_id = sessions[idx]["session_id"]
-        else:
+
+        if not target_id:
             for s in sessions:
                 if s["session_id"].startswith(clean_id):
                     target_id = s["session_id"]

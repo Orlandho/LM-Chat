@@ -69,10 +69,12 @@ class LMChatExtension(omni.ext.IExt):
                 sm = getattr(self._model, "settings_manager", None)
                 base_url = None
                 api_key = None
-                if sm:
-                    cfg = sm.get_provider_config(prov)
+                if sm and norm_prov not in ("vllm", "cloud"):
+                    can_name = sm._canonicalize_provider_name(prov)
+                    cfg = sm.get_provider_config(can_name)
+                    norm_prov = cfg.get("provider_key", norm_prov)
                     base_url = cfg.get("base_url")
-                    api_key = sm.get_effective_api_key(prov)
+                    api_key = sm.get_effective_api_key(can_name)
 
                 valid_providers = [
                     "lm_studio", "ollama", "vllm", "cloud",
@@ -98,10 +100,12 @@ class LMChatExtension(omni.ext.IExt):
                     sm = getattr(self._model, "settings_manager", None)
                     base_url = None
                     api_key = None
-                    if sm:
-                        cfg = sm.get_provider_config(prov)
+                    if sm and norm_prov not in ("vllm", "cloud"):
+                        can_name = sm._canonicalize_provider_name(prov)
+                        cfg = sm.get_provider_config(can_name)
+                        norm_prov = cfg.get("provider_key", norm_prov)
                         base_url = cfg.get("base_url")
-                        api_key = sm.get_effective_api_key(prov)
+                        api_key = sm.get_effective_api_key(can_name)
 
                     valid_providers = [
                         "lm_studio", "ollama", "vllm", "cloud",

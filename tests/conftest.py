@@ -18,19 +18,15 @@ class AsyncTestCase(unittest.IsolatedAsyncioTestCase):
     """Clase base emulada para tests asíncronos de Omniverse."""
     __test__ = True
 
-    def _setupAsync(self):
-        super()._setupAsync()
-        if asyncio.iscoroutinefunction(getattr(self, 'setUp', None)):
-            res = self.setUp()
-            if asyncio.iscoroutine(res):
-                res.close()
-
-    def _teardownAsync(self):
-        super()._teardownAsync()
-        if asyncio.iscoroutinefunction(getattr(self, 'tearDown', None)):
-            res = self.tearDown()
-            if asyncio.iscoroutine(res):
-                res.close()
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        import inspect
+        if "setUp" in cls.__dict__ and inspect.iscoroutinefunction(cls.__dict__["setUp"]):
+            cls.asyncSetUp = cls.__dict__["setUp"]
+            cls.setUp = lambda self: None
+        if "tearDown" in cls.__dict__ and inspect.iscoroutinefunction(cls.__dict__["tearDown"]):
+            cls.asyncTearDown = cls.__dict__["tearDown"]
+            cls.tearDown = lambda self: None
 
 class AutoMockModule(ModuleType):
     """Módulo mock dinámico que devuelve MagicMocks para cualquier atributo."""

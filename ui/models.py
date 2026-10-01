@@ -359,9 +359,12 @@ class ChatModel:
         matched = self._find_matching_provider(provider)
         if matched:
             self._selected_provider = matched
-            models = self.available_models
-            if models:
-                self._selected_model = models[0]
+            if hasattr(self, "_settings_manager") and self._settings_manager:
+                self._selected_model = self._settings_manager.get_default_model(matched)
+            else:
+                models = self.available_models
+                if models:
+                    self._selected_model = models[0]
             if self._current_session:
                 if not self._current_session.metadata:
                     self._current_session.metadata = {}

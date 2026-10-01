@@ -449,11 +449,15 @@ class SettingsWindow:
                 max_tokens=max_tokens_val,
             )
 
-            # Sincronizar modelo por defecto
+            # Sincronizar modelo por defecto y establecer proveedor predeterminado
             self._settings_manager.set_default_model(self._selected_provider, self._selected_model)
+            self._settings_manager.set_default_provider(self._selected_provider)
 
-            if hasattr(self, "_action_status_label"):
-                self._action_status_label.text = "✓ Configuración guardada correctamente."
+            if hasattr(self, "_default_indicator_label") and self._default_indicator_label:
+                self._default_indicator_label.text = "(Predeterminado)"
+
+            if hasattr(self, "_action_status_label") and self._action_status_label:
+                self._action_status_label.text = "✓ Configuración guardada y establecida como predeterminada."
 
             # Disparar callback de notificación hacia la vista principal
             if self._on_save_callback:

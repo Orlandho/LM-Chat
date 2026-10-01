@@ -363,9 +363,9 @@ class InferenceRouter:
 
                     # Read SSE stream line by line
                     async for raw_line in response.content:
-                        line = raw_line.decode("utf-8").strip()
-                        if line.startswith("data: "):
-                            data_str = line[6:].strip()
+                        line = raw_line.decode("utf-8", errors="replace").strip()
+                        if line.startswith("data:"):
+                            data_str = line[5:].strip()
                             if data_str == "[DONE]":
                                 break
                             try:

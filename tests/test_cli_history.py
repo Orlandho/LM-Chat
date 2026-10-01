@@ -159,3 +159,24 @@ class TestCLIHistory:
         assert cli.current_session.session_id == s.session_id
         assert cli.router.provider == "ollama"
         assert cli.router.model == "mistral:latest"
+
+    def test_cli_load_and_delete_with_numeric_only_session_id(self, tmp_path):
+        """Verifica que un session_id compuesto únicamente por dígitos decimales cargue y elimine correctamente."""
+        mgr = LocalChatHistoryManager(storage_dir=str(tmp_path))
+        # Crear sesión con ID puramente numérico (ej. '87263967000000000000000000000000')
+        s_numeric = mgr.create_session(title="Sesión Numérica")
+        s_numeric.session_id = "87263967000000000000000000000000"
+        mgr.save_session(s_numeric)
+
+        router = InferenceRouter(provider="lm_studio")
+        cli = LMChatCLI(router=router, system_prompt="Test", history_manager=mgr)
+
+        # Cargar usando los 8 dígitos iniciales
+        loaded = cli.load_session_by_identifier("87263967")
+        assert loaded is True
+        assert cli.current_session.session_id == "87263967000000000000000000000000"
+
+        # Eliminar usando los 8 dígitos iniciales
+        deleted = cli.delete_session_by_identifier("87263967")
+        assert deleted is True
+        assert mgr.get_session("87263967000000000000000000000000") is None
