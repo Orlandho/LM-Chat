@@ -71,10 +71,12 @@ class StageContextSerializer(IStageContextSerializer):
                     if not prim.IsValid():
                         continue
 
-                path_str = str(prim.GetPath())
-                if _is_mock(prim.GetPath()):
+                # Optimization: Cache GetPath() object reference to avoid calling GetPath() twice
+                path_obj = prim.GetPath()
+                if _is_mock(path_obj):
                     continue
 
+                path_str = str(path_obj)
                 # Optimization: path_str.count('/') is ~3.1x faster than list-allocating string splits
                 depth = path_str.count("/") if path_str != "/" else 0
 

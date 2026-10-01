@@ -9,3 +9,9 @@
 **Learning:** Calculating USD prim hierarchy depth using string splitting and list comprehensions (`len([p for p in path_str.strip('/').split('/') if p])`) during stage traversal creates millions of short-lived list allocations in large scenes. Replacing it with string character counting (`path_str.count('/')`) yields a ~3.1x speedup in depth determination. Additionally, calling `prim.GetAttribute("visibility")` directly avoids instantiating C++ wrapper objects (`UsdGeom.Imageable(prim)`) for every traversed prim.
 
 **Action:** Use `path_str.count('/')` for calculating OpenUSD prim depth, and query generic `prim.GetAttribute()` directly before instantiating specialized UsdGeom API wrappers.
+
+## 2026-03-31 - Non-Blocking Async Subprocess StreamReader Loop EOF Handling
+
+**Learning:** In `asyncio.subprocess` stream reader loops (e.g., stdio MCP listeners), calling `readline()` on a closed or terminated subprocess stream returns empty bytes (`b""`). Continuously calling `readline()` after EOF returns `b""` immediately without blocking. Doing `if not line: await asyncio.sleep(0.01); continue` creates an infinite busy-polling loop running 100 Hz that burns CPU, wastes memory, and blocks pending request cleanup.
+
+**Action:** Always `break` out of `readline()` loops when `not line` is encountered to gracefully terminate reader tasks upon stream EOF.
