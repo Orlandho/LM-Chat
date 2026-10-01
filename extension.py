@@ -28,6 +28,10 @@ else:
     from ui.models import ChatModel
     from logic.agent_manager import AgentManager
     from logic.chat_history import LocalChatHistoryManager
+    from logic.diagnostics import diagnose_inference_failure
+    from logic.logger import get_logger
+
+logger = get_logger("Extension")
 
 
 class LMChatExtension(omni.ext.IExt):
@@ -79,6 +83,7 @@ class LMChatExtension(omni.ext.IExt):
                 valid_providers = [
                     "lm_studio", "ollama", "vllm", "cloud",
                     "openai", "claude", "anthropic", "nvidia_spark", "nemotron",
+                    "gemini", "google",
                 ]
                 if norm_prov in valid_providers:
                     self._agent_manager.set_provider(
@@ -110,6 +115,7 @@ class LMChatExtension(omni.ext.IExt):
                     valid_providers = [
                         "lm_studio", "ollama", "vllm", "cloud",
                         "openai", "claude", "anthropic", "nvidia_spark", "nemotron",
+                        "gemini", "google",
                     ]
                     if norm_prov in valid_providers:
                         self._agent_manager.set_provider(
@@ -139,19 +145,31 @@ class LMChatExtension(omni.ext.IExt):
                 ui_feedback_callback=self._chat_window.add_message_bubble,
             )
 
-            # If final response is an error message not caught by streaming
-            if final_response.startswith("Excepción") or final_response.startswith("Error"):
-                self._chat_window.append_to_last_message(f"\n\n[Error: {final_response}]")
-                final_response = f"{final_response}\n\n[Error: {final_response}]"
+            # If final response is an unformatted error message not caught by streaming
+            if (final_response.startswith("Excepción") or final_response.startswith("Error")) and "Diagnóstico" not in final_response:
+                diag = diagnose_inference_failure(
+                    provider=self._model.current_provider if self._model else "LM Studio",
+                    model=self._model.current_model if self._model else "local-model",
+                    error_type="OrchestratorError",
+                    raw_error=final_response,
+                )
+                final_response = diag.to_markdown()
+                self._chat_window.append_to_last_message(final_response)
 
             # Finalize and persist assistant response in session history
             self._chat_window.finalize_last_assistant_message(final_response)
 
         except Exception as e:
-            error_msg = f"\n\nExcepción grave en el orquestador: {str(e)}"
-            print(f"[omni.lm_chat] {error_msg}")
-            self._chat_window.append_to_last_message(error_msg)
-            self._chat_window.finalize_last_assistant_message(error_msg)
+            logger.error(f"Excepción grave en el orquestador: {e}", exc_info=e)
+            diag = diagnose_inference_failure(
+                provider=self._model.current_provider if self._model else "LM Studio",
+                model=self._model.current_model if self._model else "local-model",
+                error_type=type(e).__name__,
+                raw_error=str(e),
+            )
+            diag_md = diag.to_markdown()
+            self._chat_window.append_to_last_message(diag_md)
+            self._chat_window.finalize_last_assistant_message(diag_md)
         finally:
             if self._chat_window:
                 self._chat_window.set_button_state(processing=False)

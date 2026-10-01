@@ -5,7 +5,7 @@
 Ventana de Configuración de Servicios y Modelos para LM-Chat™ (omni.ui).
 
 Permite al usuario seleccionar el servicio predeterminado (OpenAI, Claude, Ollama,
-LM Studio, NVIDIA Spark), el modelo predeterminado, configurar URLs con presets de 1 clic,
+LM Studio, NVIDIA Spark, Google Gemini), el modelo predeterminado, configurar URLs con presets de 1 clic,
 ingresar credenciales y verificar conectividad en tiempo real.
 """
 
@@ -15,6 +15,9 @@ import omni.ui as ui
 
 from core.interfaces import ISettingsManager
 from logic.settings_manager import SettingsManager
+from logic.logger import get_logger
+
+logger = get_logger("SettingsWindow")
 
 
 class SettingsWindow:
@@ -100,7 +103,7 @@ class SettingsWindow:
                             style={"font_size": 16, "font_weight": "bold", "color": 0xFF00B4D8},
                         )
                         ui.Label(
-                            "Configura OpenAI API, Claude API, Ollama, LM Studio y NVIDIA Spark con unos clics.",
+                            "Configura OpenAI API, Claude API, Ollama, LM Studio, NVIDIA Spark y Google Gemini con presets de 1 clic.",
                             style={"font_size": 12, "color": 0xFFAAAAAA},
                         )
 

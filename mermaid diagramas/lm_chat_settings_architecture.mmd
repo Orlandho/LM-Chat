@@ -1,0 +1,81 @@
+graph TD
+    classDef uiStyle fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc;
+    classDef mgrStyle fill:#0f172a,stroke:#a855f7,stroke-width:2px,color:#f8fafc;
+    classDef routerStyle fill:#1e1e2e,stroke:#22c55e,stroke-width:2px,color:#f8fafc;
+    classDef diagStyle fill:#3b0764,stroke:#ec4899,stroke-width:2px,color:#f8fafc;
+    classDef logStyle fill:#14532d,stroke:#4ade80,stroke-width:2px,color:#f8fafc;
+    classDef providerStyle fill:#262626,stroke:#f59e0b,stroke-width:2px,color:#f8fafc;
+
+    subgraph UI ["NVIDIA Omniverse Native omni.ui Interface"]
+        W["Window Menu: 'LM-Chat'<br/>(Reemplaza 'Chat USD')"]:::uiStyle
+        CW["ChatWindow ('LM-Chat')"]:::uiStyle
+        HDR["Header Bar"]:::uiStyle
+        BTN["Boton 'Settings'"]:::uiStyle
+        PCOMBO["Combo Proveedor"]:::uiStyle
+        MCOMBO["Combo Modelo"]:::uiStyle
+        SW["SettingsWindow (Modal)"]:::uiStyle
+        BUBBLE_DIAG["Burbuja Alerta Diagnóstico<br/>(Badge + Botón Settings + Copiar)"]:::uiStyle
+
+        W --> CW
+        CW --> HDR
+        HDR --> BTN
+        HDR --> PCOMBO
+        HDR --> MCOMBO
+        BTN -->|Click| SW
+        CW --> BUBBLE_DIAG
+    end
+
+    subgraph SETTINGS ["Settings & State Management"]
+        SM["SettingsManager (ISettingsManager)"]:::mgrStyle
+        CONF["~/.omni_lm_chat/settings.json"]:::mgrStyle
+        PRESETS["Presets 1-Clic & Defaults"]:::mgrStyle
+        TEST_CONN["Test Conexión 1-Clic (aiohttp)"]:::mgrStyle
+
+        SW -->|Configura & Guarda| SM
+        SM -->|Lectura / Escritura Atomica| CONF
+        SM --> PRESETS
+        SW -->|Prueba en vivo| TEST_CONN
+    end
+
+    subgraph DIAGNOSTICS ["Motor de Diagnóstico & Registro Unificado"]
+        LOGGER["LMChatLogger (Buffer Circular + carb + Archivo)"]:::logStyle
+        DIAG["diagnose_inference_failure()"]:::diagStyle
+        ERR_OBJ["ErrorDiagnostic (Markdown / Plain Text)"]:::diagStyle
+
+        DIAG --> ERR_OBJ
+        ERR_OBJ -->|Renderiza tarjeta visual| BUBBLE_DIAG
+        LOGGER -.->|Auditoría en memoria| CW
+    end
+
+    subgraph ENGINE ["Inference Routing & Execution"]
+        AM["AgentManager (ReAct Reflection Loop)"]:::routerStyle
+        IR["InferenceRouter (Multi-Provider Gateway)"]:::routerStyle
+        SSE["Stream Parser (OpenAI SSE & Claude Messages SSE)"]:::routerStyle
+
+        CW -->|Mensaje / Prompt| AM
+        AM --> IR
+        IR --> SSE
+        SM -.->|Suministra URLs, Keys y Defaults| IR
+
+        IR -->|Error HTTP / Timeout / Refused| DIAG
+        AM -->|Fallo no controlado| DIAG
+        TEST_CONN -->|Fallo de conectividad| DIAG
+        AM -->|Registra eventos| LOGGER
+        IR -->|Registra peticiones/latencias| LOGGER
+    end
+
+    subgraph SERVICES ["Servicios de Inferencia Contemporáneos"]
+        P1["OpenAI API<br/>(gpt-4o, o3-mini, gpt-4.5)"]:::providerStyle
+        P2["Claude API<br/>(claude-3-7-sonnet)"]:::providerStyle
+        P3["Ollama<br/>(deepseek-r1:8b, qwen2.5-coder)"]:::providerStyle
+        P4["LM Studio<br/>(qwen2.5-coder, deepseek-r1)"]:::providerStyle
+        P5["NVIDIA Spark / NIM<br/>(llama-3.1-nemotron-70b)"]:::providerStyle
+        P6["Google Gemini API<br/>(gemini-2.0-flash)"]:::providerStyle
+
+        SSE -->|Bearer Token & /chat/completions| P1
+        SSE -->|x-api-key & /v1/messages| P2
+        SSE -->|Localhost /chat/completions| P3
+        SSE -->|Localhost /chat/completions| P4
+        SSE -->|NVIDIA API Key & /chat/completions| P5
+        SSE -->|OpenAI-Compat & /chat/completions| P6
+    end

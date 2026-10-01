@@ -107,7 +107,7 @@ class TestSettingsManager(unittest.IsolatedAsyncioTestCase):
 
     def test_presets_availability(self):
         """Verifica que todos los servicios principales tengan presets de 1 clic."""
-        for prov in ["LM Studio", "Ollama", "OpenAI API", "Claude API", "NVIDIA Spark"]:
+        for prov in ["LM Studio", "Ollama", "OpenAI API", "Claude API", "NVIDIA Spark", "Google Gemini API"]:
             presets = self.manager.get_presets(prov)
             self.assertIsInstance(presets, list)
             self.assertGreater(len(presets), 0)

@@ -28,6 +28,26 @@ class AsyncTestCase(unittest.IsolatedAsyncioTestCase):
             cls.asyncTearDown = cls.__dict__["tearDown"]
             cls.tearDown = lambda self: None
 
+def _mock_label_factory(*args, **kwargs):
+    m = MagicMock()
+    m.text = args[0] if args else kwargs.get("text", "")
+    m.style = kwargs.get("style", {})
+    return m
+
+def _mock_button_factory(*args, **kwargs):
+    m = MagicMock()
+    m.text = args[0] if args else kwargs.get("text", "")
+    m.style = kwargs.get("style", {})
+    m.set_clicked_fn = lambda fn: setattr(m, "_clicked_fn", fn)
+    if "clicked_fn" in kwargs:
+        m._clicked_fn = kwargs["clicked_fn"]
+    return m
+
+def _mock_rectangle_factory(*args, **kwargs):
+    m = MagicMock()
+    m.style = kwargs.get("style", {})
+    return m
+
 class AutoMockModule(ModuleType):
     """Módulo mock dinámico que devuelve MagicMocks para cualquier atributo."""
     __test__ = False
@@ -38,6 +58,19 @@ class AutoMockModule(ModuleType):
             return sys.modules[submod_name]
         if name == 'AsyncTestCase':
             return AsyncTestCase
+        if self.__name__ == 'omni.ui':
+            if name == 'Label':
+                val = MagicMock(side_effect=_mock_label_factory)
+                setattr(self, name, val)
+                return val
+            if name == 'Button':
+                val = MagicMock(side_effect=_mock_button_factory)
+                setattr(self, name, val)
+                return val
+            if name == 'Rectangle':
+                val = MagicMock(side_effect=_mock_rectangle_factory)
+                setattr(self, name, val)
+                return val
         if name.startswith('__') and name.endswith('__'):
             raise AttributeError(name)
         val = MagicMock()

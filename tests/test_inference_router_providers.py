@@ -176,6 +176,172 @@ class TestInferenceRouterNewProviders(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(chunks[0]["data"]["choices"][0]["delta"]["content"], "NVIDIA")
         self.assertEqual(chunks[1]["data"]["choices"][0]["delta"]["content"], " Spark")
 
+    @patch("aiohttp.ClientSession.post")
+    async def test_stream_http_error_diagnostics(self, mock_post):
+        """Verifica que un error HTTP durante streaming produzca un diagnóstico estructurado."""
+        mock_response = AsyncMock()
+        mock_response.status = 401
+        mock_response.text.return_value = '{"error": {"message": "Invalid API key"}}'
+        mock_post.return_value.__aenter__.return_value = mock_response
+
+        router = InferenceRouter(provider="openai", api_key="bad-key")
+        chunks = []
+        async for chunk in router.stream_chat_completions([{"role": "user", "content": "Hola"}]):
+            chunks.append(chunk)
+
+        self.assertEqual(len(chunks), 1)
+        err_chunk = chunks[0]
+        self.assertFalse(err_chunk["success"])
+        self.assertEqual(err_chunk["status"], 401)
+        self.assertIn("diagnostic", err_chunk)
+        self.assertIn("diagnostic_md", err_chunk)
+        self.assertIn("### ⚠️ Diagnóstico LM-Chat:", err_chunk["diagnostic_md"])
+        self.assertIn("OPENAI_API_KEY", err_chunk["diagnostic_md"])
+
+    @patch("aiohttp.ClientSession.post")
+    async def test_stream_connection_refused_diagnostics(self, mock_post):
+        """Verifica que una falla de conexión en streaming genere diagnóstico accionable."""
+        mock_post.side_effect = aiohttp.ClientConnectorError(
+            connection_key=MagicMock(), os_error=OSError(111, "Connection refused")
+        )
+
+        router = InferenceRouter(provider="ollama")
+        chunks = []
+        async for chunk in router.stream_chat_completions([{"role": "user", "content": "Hola"}]):
+            chunks.append(chunk)
+
+        self.assertEqual(len(chunks), 1)
+        err_chunk = chunks[0]
+        self.assertFalse(err_chunk["success"])
+        self.assertEqual(err_chunk["error_type"], "ConnectionError")
+        self.assertIn("diagnostic_md", err_chunk)
+        self.assertIn("ollama serve", err_chunk["diagnostic_md"])
+
+    async def test_google_gemini_provider_configuration(self):
+        """Verifica la configuración del endpoint compatible de Google Gemini."""
+        router = InferenceRouter(provider="gemini", api_key="test-gemini-key")
+        self.assertEqual(router.provider, "gemini")
+        self.assertEqual(router.base_url, "https://generativelanguage.googleapis.com/v1beta/openai")
+        self.assertEqual(router.model, "gemini-2.0-flash")
+
+        headers = router.get_headers()
+        self.assertEqual(headers["Authorization"], "Bearer test-gemini-key")
+        self.assertEqual(
+            router.get_endpoint_url("/chat/completions"),
+            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+        )
+
+    async def test_display_name_provider_resolution(self):
+        """Verifica que los nombres de la UI (OpenAI API, Claude API, etc.) resuelvan URLs y modelos correctos."""
+        # Google Gemini API
+        r_gem = InferenceRouter(provider="Google Gemini API")
+        self.assertEqual(r_gem.provider, "gemini")
+        self.assertEqual(r_gem.base_url, "https://generativelanguage.googleapis.com/v1beta/openai")
+        self.assertEqual(r_gem.model, "gemini-2.0-flash")
+
+        # OpenAI API
+        r_oai = InferenceRouter(provider="OpenAI API")
+        self.assertEqual(r_oai.provider, "openai")
+        self.assertEqual(r_oai.base_url, "https://api.openai.com/v1")
+        self.assertEqual(r_oai.model, "gpt-4o")
+
+        # Claude API
+        r_cld = InferenceRouter(provider="Claude API")
+        self.assertEqual(r_cld.provider, "claude")
+        self.assertEqual(r_cld.base_url, "https://api.anthropic.com/v1")
+        self.assertEqual(r_cld.model, "claude-3-7-sonnet-latest")
+        self.assertTrue(r_cld._is_anthropic_direct())
+
+        # NVIDIA Spark
+        r_spk = InferenceRouter(provider="NVIDIA Spark")
+        self.assertEqual(r_spk.provider, "nvidia_spark")
+        self.assertEqual(r_spk.base_url, "https://integrate.api.nvidia.com/v1")
+        self.assertEqual(r_spk.model, "nvidia/llama-3.1-nemotron-70b-instruct")
+
+    async def test_openai_reasoning_models_payload_adaptation(self):
+        """Verifica que o1 y o3-mini no incluyan 'temperature' y transformen max_tokens a max_completion_tokens."""
+        for m in ["o1", "o3-mini", "o1-mini", "o1-preview"]:
+            router = InferenceRouter(provider="openai", model=m)
+            payload = router._prepare_payload(
+                messages=[{"role": "user", "content": "Razona esto"}],
+                temperature=0.8,
+                max_tokens=2048,
+            )
+            self.assertNotIn("temperature", payload, f"Modelo {m} no debe incluir temperature en payload")
+            self.assertEqual(payload.get("max_completion_tokens"), 2048)
+            self.assertNotIn("max_tokens", payload)
+
+    async def test_anthropic_alternating_messages_sanitization(self):
+        """Verifica que Claude fusione mensajes consecutivos del mismo rol y omita vacíos."""
+        router = InferenceRouter(provider="claude")
+        msgs = [
+            {"role": "user", "content": "Primera parte"},
+            {"role": "user", "content": "Segunda parte"},
+            {"role": "assistant", "content": " "},  # Mensaje vacío debe descartarse
+            {"role": "user", "content": "Tercera parte"},
+        ]
+        payload = router._prepare_payload(msgs)
+        prepared_msgs = payload["messages"]
+        self.assertEqual(len(prepared_msgs), 1)
+        self.assertEqual(prepared_msgs[0]["role"], "user")
+        self.assertEqual(prepared_msgs[0]["content"], "Primera parte\n\nSegunda parte\n\nTercera parte")
+
+    @patch("aiohttp.ClientSession.post")
+    async def test_claude_37_thinking_delta_streaming(self, mock_post):
+        """Verifica que los chunks de tipo thinking_delta de Claude 3.7 Sonnet se procesen sin error."""
+        async def mock_sse_stream():
+            lines = [
+                b'event: content_block_delta\n',
+                b'data: {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "Pensando la solucion..."}}\n',
+                b'event: content_block_delta\n',
+                b'data: {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": "Resultado final."}}\n',
+                b'data: [DONE]\n',
+            ]
+            for line in lines:
+                yield line
+
+        mock_response = AsyncMock()
+        mock_response.status = 200
+        mock_response.content = mock_sse_stream()
+        mock_post.return_value.__aenter__.return_value = mock_response
+
+        router = InferenceRouter(provider="claude")
+        chunks = []
+        async for chunk in router.stream_chat_completions([{"role": "user", "content": "Prueba thinking"}]):
+            chunks.append(chunk)
+
+        self.assertEqual(len(chunks), 2)
+        # Primer chunk debe tener reasoning_content
+        self.assertEqual(chunks[0]["data"]["choices"][0]["delta"].get("reasoning_content"), "Pensando la solucion...")
+        # Segundo chunk debe tener content
+        self.assertEqual(chunks[1]["data"]["choices"][0]["delta"].get("content"), "Resultado final.")
+
+    @patch("aiohttp.ClientSession.post")
+    async def test_deepseek_r1_null_content_streaming(self, mock_post):
+        """Verifica que deltas con content=null en DeepSeek-R1 se normalicen a cadena vacía sin fallar."""
+        async def mock_sse_stream():
+            lines = [
+                b'data: {"choices": [{"delta": {"content": null, "reasoning_content": "Paso 1..."}}]}\n',
+                b'data: {"choices": [{"delta": {"content": "Respuesta definitiva."}}]}\n',
+                b'data: [DONE]\n',
+            ]
+            for line in lines:
+                yield line
+
+        mock_response = AsyncMock()
+        mock_response.status = 200
+        mock_response.content = mock_sse_stream()
+        mock_post.return_value.__aenter__.return_value = mock_response
+
+        router = InferenceRouter(provider="ollama", model="deepseek-r1:8b")
+        chunks = []
+        async for chunk in router.stream_chat_completions([{"role": "user", "content": "Prueba R1"}]):
+            chunks.append(chunk)
+
+        self.assertEqual(len(chunks), 2)
+        self.assertEqual(chunks[0]["data"]["choices"][0]["delta"]["content"], "")
+        self.assertEqual(chunks[1]["data"]["choices"][0]["delta"]["content"], "Respuesta definitiva.")
+
 
 if __name__ == "__main__":
     unittest.main()

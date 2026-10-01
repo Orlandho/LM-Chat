@@ -7,6 +7,10 @@ Módulo de Gestión de Configuración Persistente (SettingsManager) para LM-Chat
 Implementa ISettingsManager para centralizar y persistir las preferencias del usuario:
 proveedor predeterminado, modelo predeterminado, URLs de servidores, credenciales y
 parámetros de inferencia (temperatura, timeout, max_tokens) con presets de 1 clic.
+
+Integra modelos contemporáneos y emergentes (OpenAI GPT-4o / o3-mini / GPT-4.5,
+Claude 3.7 Sonnet / 3.5 Haiku, NVIDIA NIM Nemotron-70B, Ollama / LM Studio
+con DeepSeek-R1 y Qwen 2.5 Coder, Gemini 2.0 Flash) y diagnósticos avanzados de conectividad.
 """
 
 import os
@@ -17,6 +21,11 @@ from typing import Dict, Any, List, Optional
 import aiohttp
 
 from core.interfaces import ISettingsManager, ProviderSettings
+from logic.logger import get_logger
+from logic.diagnostics import diagnose_inference_failure, ErrorDiagnostic
+
+
+logger = get_logger("SettingsManager")
 
 
 class SettingsManager(ISettingsManager):
@@ -25,7 +34,7 @@ class SettingsManager(ISettingsManager):
     DEFAULT_CONFIG_DIR = os.path.expanduser(os.path.join("~", ".omni_lm_chat"))
     DEFAULT_CONFIG_PATH = os.path.join(DEFAULT_CONFIG_DIR, "settings.json")
 
-    # Mapeo y presets recomendados de proveedores
+    # Mapeo y presets recomendados de proveedores contemporáneos y de próxima generación
     DEFAULT_PROVIDERS_CONFIG: Dict[str, Dict[str, Any]] = {
         "LM Studio": {
             "name": "LM Studio",
@@ -35,8 +44,12 @@ class SettingsManager(ISettingsManager):
             "available_models": [
                 "local-model",
                 "qwen2.5-coder-7b",
+                "qwen2.5-coder-14b",
+                "qwen2.5-coder-32b",
                 "deepseek-r1-distill-qwen-14b",
+                "deepseek-r1-distill-qwen-32b",
                 "llama-3.2-3b-instruct",
+                "llama-3.3-70b-instruct",
             ],
             "api_key": "",
             "env_key": None,
@@ -57,10 +70,14 @@ class SettingsManager(ISettingsManager):
                 "llama3:latest",
                 "llama3.3:latest",
                 "llama3.1:8b",
+                "qwen2.5-coder:7b",
+                "qwen2.5-coder:14b",
+                "qwen2.5-coder:32b",
+                "deepseek-r1:8b",
+                "deepseek-r1:14b",
+                "deepseek-r1:32b",
                 "codellama:7b",
                 "mistral:latest",
-                "qwen2.5-coder:7b",
-                "deepseek-r1:8b",
             ],
             "api_key": "",
             "env_key": None,
@@ -82,6 +99,8 @@ class SettingsManager(ISettingsManager):
                 "gpt-4o-mini",
                 "o3-mini",
                 "o1",
+                "o1-mini",
+                "gpt-4.5-preview",
                 "gpt-4-turbo",
             ],
             "api_key": "",
@@ -102,6 +121,7 @@ class SettingsManager(ISettingsManager):
                 "claude-3-7-sonnet-latest",
                 "claude-3-5-sonnet-latest",
                 "claude-3-5-haiku-latest",
+                "claude-3-5-opus-latest",
                 "claude-3-opus-latest",
             ],
             "api_key": "",
@@ -124,6 +144,7 @@ class SettingsManager(ISettingsManager):
                 "meta/llama-3.1-405b-instruct",
                 "nvidia/nemotron-4-340b-instruct",
                 "mistralai/mixtral-8x22b-instruct-v0.1",
+                "deepseek-ai/deepseek-r1",
             ],
             "api_key": "",
             "env_key": "NVIDIA_API_KEY",
@@ -133,6 +154,26 @@ class SettingsManager(ISettingsManager):
             "presets": [
                 {"label": "NVIDIA Build Cloud (NIM)", "url": "https://integrate.api.nvidia.com/v1"},
                 {"label": "DGX Spark Local NIM (:8000)", "url": "http://localhost:8000/v1"},
+            ],
+        },
+        "Google Gemini API": {
+            "name": "Google Gemini API",
+            "provider_key": "gemini",
+            "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+            "default_model": "gemini-2.5-pro",
+            "available_models": [
+                "gemini-2.5-pro",
+                "gemini-2.5-flash",
+                "gemini-2.0-flash",
+                "gemini-1.5-pro",
+            ],
+            "api_key": "",
+            "env_key": "GEMINI_API_KEY",
+            "temperature": 0.7,
+            "timeout": 600.0,
+            "max_tokens": 4096,
+            "presets": [
+                {"label": "Google Gemini OpenAI-Compat", "url": "https://generativelanguage.googleapis.com/v1beta/openai"},
             ],
         },
     }
@@ -153,6 +194,12 @@ class SettingsManager(ISettingsManager):
         "nvidia_spark": "NVIDIA Spark",
         "nvidia spark": "NVIDIA Spark",
         "nemotron": "NVIDIA Spark",
+        "gemini": "Google Gemini API",
+        "google": "Google Gemini API",
+        "google gemini": "Google Gemini API",
+        "google_gemini": "Google Gemini API",
+        "google gemini api": "Google Gemini API",
+        "muse": "LM Studio",
         "vllm": "LM Studio",
         "cloud": "OpenAI API",
         "cloud apis": "OpenAI API",
@@ -202,6 +249,7 @@ class SettingsManager(ISettingsManager):
         self._settings_data["default_provider"] = can_name
         # Sincronizar modelo por defecto
         self._settings_data["default_model"] = self.get_default_model(can_name)
+        logger.info(f"Proveedor predeterminado establecido: {can_name} con modelo: {self._settings_data['default_model']}")
         self.save()
 
     def get_default_model(self, provider_name: str) -> str:
@@ -222,6 +270,7 @@ class SettingsManager(ISettingsManager):
         self._settings_data["providers"][can_name]["default_model"] = model_name
         if self.get_default_provider() == can_name:
             self._settings_data["default_model"] = model_name
+        logger.info(f"Modelo predeterminado actualizado para {can_name}: {model_name}")
         self.save()
 
     def get_available_models(self, provider_name: str) -> List[str]:
@@ -243,6 +292,7 @@ class SettingsManager(ISettingsManager):
         models = p_cfg.get("available_models", [])
         if cleaned not in models:
             models.append(cleaned)
+            logger.info(f"Modelo personalizado agregado a {can_name}: {cleaned}")
             self.update_provider_config(can_name, available_models=models)
 
     def get_provider_config(self, provider_name: str) -> Dict[str, Any]:
@@ -270,6 +320,7 @@ class SettingsManager(ISettingsManager):
             if v is not None:
                 self._settings_data["providers"][can_name][k] = v
 
+        logger.debug(f"Configuración de {can_name} actualizada: {list(kwargs.keys())}")
         return self.save()
 
     def get_effective_api_key(self, provider_name: str) -> Optional[str]:
@@ -297,8 +348,12 @@ class SettingsManager(ISettingsManager):
             try:
                 with open(self._config_path, "r", encoding="utf-8") as f:
                     self._settings_data = json.load(f)
+                logger.debug(f"Configuración cargada exitosamente desde {self._config_path}")
             except Exception as e:
-                print(f"[SettingsManager] Advertencia: Error leyendo configuración ({e}). Usando valores por defecto.")
+                logger.warning(
+                    f"Error leyendo configuración ({e}). Usando valores por defecto.",
+                    exc_info=e,
+                )
                 self.reset_to_defaults()
         else:
             self.reset_to_defaults()
@@ -319,9 +374,10 @@ class SettingsManager(ISettingsManager):
                 os.replace(temp_path, self._config_path)
             else:
                 os.rename(temp_path, self._config_path)
+            logger.debug(f"Configuración persistida atómicamente en {self._config_path}")
             return True
         except Exception as e:
-            print(f"[SettingsManager] Error guardando archivo de configuración: {e}")
+            logger.error(f"Error guardando archivo de configuración en {self._config_path}: {e}", exc_info=e)
             return False
 
     def reset_to_defaults(self) -> None:
@@ -331,6 +387,7 @@ class SettingsManager(ISettingsManager):
             "default_model": "local-model",
             "providers": json.loads(json.dumps(self.DEFAULT_PROVIDERS_CONFIG)),
         }
+        logger.info("Configuración restablecida a valores por defecto")
         self.save()
 
     async def test_connection(
@@ -349,18 +406,31 @@ class SettingsManager(ISettingsManager):
             timeout (float): Tiempo máximo de espera en segundos.
 
         Returns:
-            Dict[str, Any]: Diccionario con estado ('success': bool, 'message': str, 'latency_ms': float).
+            Dict[str, Any]: Diccionario con estado ('success': bool, 'message': str, 'latency_ms': float, 'diagnostic': ErrorDiagnostic).
         """
         can_name = self._canonicalize_provider_name(provider_name)
         cfg = self.get_provider_config(can_name)
         target_url = (base_url or cfg.get("base_url", "")).strip().rstrip("/")
         target_key = api_key if api_key is not None else (self.get_effective_api_key(can_name) or "")
+        target_model = self.get_default_model(can_name)
+
+        logger.info(f"Iniciando verificación de conexión para proveedor='{can_name}' en URL='{target_url}' (timeout={timeout}s)")
 
         if not target_url.startswith("http://") and not target_url.startswith("https://"):
+            diag = diagnose_inference_failure(
+                provider=can_name,
+                model=target_model,
+                base_url=target_url,
+                error_type="ConfigurationError",
+                error_message="Invalid URL scheme",
+                raw_error=f"La URL debe comenzar con http:// o https:// ({target_url})",
+            )
+            logger.warning(f"URL inválida para proveedor='{can_name}': {target_url}")
             return {
                 "success": False,
                 "message": f"URL inválida: Debe comenzar con http:// o https:// ({target_url})",
                 "latency_ms": 0.0,
+                "diagnostic": diag,
             }
 
         headers: Dict[str, str] = {"Content-Type": "application/json"}
@@ -383,6 +453,7 @@ class SettingsManager(ISettingsManager):
                 async with session.get(test_endpoint, headers=headers) as response:
                     latency = round((time.monotonic() - start_time) * 1000, 1)
                     if response.status == 200:
+                        logger.info(f"Conexión exitosa con {can_name} en {latency} ms (HTTP 200 OK)")
                         return {
                             "success": True,
                             "message": f"Conexión exitosa ({response.status} OK - {latency} ms)",
@@ -390,49 +461,126 @@ class SettingsManager(ISettingsManager):
                             "status": response.status,
                         }
                     elif response.status in (401, 403):
+                        try:
+                            text_raw = await response.text()
+                            text = text_raw if isinstance(text_raw, str) else ""
+                        except Exception:
+                            text = ""
+                        logger.warning(f"Fallo de autenticación con {can_name} (HTTP {response.status})")
+                        diag = diagnose_inference_failure(
+                            provider=can_name,
+                            model=target_model,
+                            base_url=target_url,
+                            status_code=response.status,
+                            raw_error=text,
+                        )
                         return {
                             "success": False,
                             "message": f"Error de autenticación ({response.status}): Clave de API inválida o faltante.",
                             "latency_ms": latency,
                             "status": response.status,
+                            "diagnostic": diag,
                         }
                     elif response.status == 404:
-                        # Si /models da 404 (algunos servidores locales solo exponen /chat/completions)
-                        # Hacemos fallback rápido probando un ping OPTIONS o un POST vacío
-                        return {
-                            "success": True,
-                            "message": f"Servidor alcanzable ({response.status} - {latency} ms)",
-                            "latency_ms": latency,
-                            "status": response.status,
-                        }
+                        # Si /models da 404, en servidores locales indica que el puerto responde
+                        is_local = any(k in can_name.lower() for k in ("lm studio", "ollama", "localhost", "127.0.0.1"))
+                        if is_local:
+                            logger.info(f"Servidor alcanzable con código 404 en /models ({can_name} en {latency} ms)")
+                            return {
+                                "success": True,
+                                "message": f"Servidor alcanzable ({response.status} - {latency} ms)",
+                                "latency_ms": latency,
+                                "status": response.status,
+                            }
+                        else:
+                            try:
+                                text_raw = await response.text()
+                                text = text_raw if isinstance(text_raw, str) else ""
+                            except Exception:
+                                text = ""
+                            logger.warning(f"Endpoint no encontrado para {can_name} (HTTP 404 en {test_endpoint})")
+                            diag = diagnose_inference_failure(
+                                provider=can_name,
+                                model=target_model,
+                                base_url=target_url,
+                                status_code=404,
+                                raw_error=f"Endpoint no encontrado (404) en {test_endpoint}: {text}",
+                            )
+                            return {
+                                "success": False,
+                                "message": f"Endpoint no encontrado (HTTP 404). Verifica la URL configurada.",
+                                "latency_ms": latency,
+                                "status": 404,
+                                "diagnostic": diag,
+                            }
                     else:
-                        text = await response.text()
+                        try:
+                            text_raw = await response.text()
+                            text = text_raw if isinstance(text_raw, str) else ""
+                        except Exception:
+                            text = ""
                         short_err = text[:120].strip() if text else f"HTTP {response.status}"
+                        logger.warning(f"Respuesta inesperada de {can_name} (HTTP {response.status}): {short_err}")
+                        diag = diagnose_inference_failure(
+                            provider=can_name,
+                            model=target_model,
+                            base_url=target_url,
+                            status_code=response.status,
+                            raw_error=text,
+                        )
                         return {
                             "success": False,
                             "message": f"Respuesta inesperada ({response.status}): {short_err}",
                             "latency_ms": latency,
                             "status": response.status,
+                            "diagnostic": diag,
                         }
 
         except aiohttp.ClientConnectorError as e:
+            logger.error(f"Conexión rehusada al contactar {can_name} en {target_url}: {e}")
+            diag = diagnose_inference_failure(
+                provider=can_name,
+                model=target_model,
+                base_url=target_url,
+                error_type="ConnectionError",
+                raw_error=str(e),
+            )
             return {
                 "success": False,
                 "message": f"Conexión rehusada al servidor ({target_url}). ¿Está el servicio en ejecución?",
                 "latency_ms": 0.0,
                 "error_type": "ClientConnectorError",
+                "diagnostic": diag,
             }
         except asyncio.TimeoutError:
+            logger.warning(f"Tiempo de espera agotado ({timeout}s) contactando {can_name} en {target_url}")
+            diag = diagnose_inference_failure(
+                provider=can_name,
+                model=target_model,
+                base_url=target_url,
+                error_type="TimeoutError",
+                timeout=timeout,
+            )
             return {
                 "success": False,
                 "message": f"Tiempo de espera agotado ({timeout}s) contactando {target_url}.",
                 "latency_ms": 0.0,
                 "error_type": "TimeoutError",
+                "diagnostic": diag,
             }
         except Exception as e:
+            logger.error(f"Excepción verificando conexión con {can_name}: {e}", exc_info=e)
+            diag = diagnose_inference_failure(
+                provider=can_name,
+                model=target_model,
+                base_url=target_url,
+                error_type=type(e).__name__,
+                raw_error=str(e),
+            )
             return {
                 "success": False,
                 "message": f"Error al verificar conexión: {str(e)}",
                 "latency_ms": 0.0,
                 "error_type": type(e).__name__,
+                "diagnostic": diag,
             }

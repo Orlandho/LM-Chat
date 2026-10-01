@@ -135,3 +135,69 @@ class TestChatWindowHistoryIntegration:
         assert sync_mock.called
         cleared_sess = sync_mock.call_args[0][0]
         assert len(cleared_sess.messages) == 0
+
+    def test_add_diagnostic_message_bubble_styling(self, tmp_path):
+        """Verifica que los mensajes de diagnóstico se rendericen como burbujas de alerta con botón Settings."""
+        mgr = LocalChatHistoryManager(storage_dir=str(tmp_path))
+        model = ChatModel(history_manager=mgr)
+        window = ChatWindow(model=model)
+
+        diag_text = (
+            "### ⚠️ Diagnóstico LM-Chat: Servidor Ollama no detectado o apagado\n\n"
+            "**Estado:** `Red / Conexión` | **Proveedor:** `Ollama` | **Modelo:** `llama3`\n\n"
+            "**Pasos recomendados para solucionarlo:**\n"
+            "1. Verifica que Ollama esté en ejecución con `ollama serve`."
+        )
+
+        # No debe lanzar ninguna excepción y debe añadir etiquetas
+        window.add_message_bubble("assistant", diag_text)
+        assert len(window._message_labels) >= 1
+        comps = window._last_assistant_bubble_components
+        assert comps is not None
+        assert comps["role_label"].text == "⚠️ DIAGNÓSTICO DEL SISTEMA"
+        window.destroy()
+
+    def test_dynamic_diagnostic_bubble_upgrade_during_streaming(self, tmp_path):
+        """Verifica que una burbuja inicialmente vacía se actualice a diagnóstico al recibir streaming de error."""
+        mgr = LocalChatHistoryManager(storage_dir=str(tmp_path))
+        model = ChatModel(history_manager=mgr)
+        window = ChatWindow(model=model)
+
+        # Simular inicio de respuesta vacía
+        window.add_message_bubble("assistant", "")
+        comps = window._last_assistant_bubble_components
+        assert comps is not None
+        assert comps["role_label"].text == "Agente IA"
+
+        # Simular llegada de fragmento de diagnóstico
+        diag_chunk = "### ⚠️ Diagnóstico LM-Chat: Servidor LM Studio apagado"
+        window.append_to_last_message(diag_chunk)
+
+        # Debe haberse actualizado dinámicamente
+        assert comps["role_label"].text == "⚠️ DIAGNÓSTICO DEL SISTEMA"
+        assert comps["bg_rect"].style["background_color"] == 0xFF2D1616
+        assert comps["settings_btn"] is not None
+        window.destroy()
+
+    def test_copy_button_copies_streamed_content(self, tmp_path):
+        """Verifica que el botón de copiar obtenga el texto transmitido dinámicamente y no la cadena vacía inicial."""
+        mgr = LocalChatHistoryManager(storage_dir=str(tmp_path))
+        model = ChatModel(history_manager=mgr)
+        window = ChatWindow(model=model)
+
+        copied = []
+        window._copy_to_clipboard = lambda t: copied.append(t)
+
+        window.add_message_bubble("assistant", "")
+        window.append_to_last_message("Texto generado por el modelo.")
+
+        comps = window._last_assistant_bubble_components
+        copy_btn = comps["copy_btn"]
+        # Simular clic en copiar
+        if hasattr(copy_btn, "_clicked_fn") and copy_btn._clicked_fn:
+            copy_btn._clicked_fn()
+
+        assert len(copied) == 1
+        assert copied[0] == "Texto generado por el modelo."
+        window.destroy()
+

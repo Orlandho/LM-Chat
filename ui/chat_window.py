@@ -14,6 +14,9 @@ import omni.appwindow
 
 from core.interfaces import IChatView, ChatSession
 from ui.models import ChatModel
+from logic.logger import get_logger
+
+logger = get_logger("ChatWindow")
 
 # Pre-compiled regular expression pattern for Markdown code block parsing
 _MARKDOWN_CODE_PATTERN = re.compile(r"```(\w*)\n?(.*?)```", re.DOTALL)
@@ -621,14 +624,22 @@ class ChatWindow(IChatView):
         return blocks if blocks else [("text", text)]
 
     def add_message_bubble(self, role: str, text: str = "") -> None:
-        """Crea una nueva burbuja de mensaje con formato diferenciado (Usuario vs Agente).
+        """Crea una nueva burbuja de mensaje con formato diferenciado (Usuario vs Agente vs Diagnóstico).
 
         Args:
             role (str): Rol del emisor ("user", "assistant", "system").
             text (str): Texto inicial de la burbuja.
         """
         is_user = (role == "user")
-        bg_color = 0xFF2B5278 if is_user else 0xFF3A3A3A  # Colores nativos especificados
+        is_diagnostic = ("Diagnóstico LM-Chat" in text or "Diagnóstico de Conexión" in text or text.strip().startswith("### ⚠️ Diagnóstico"))
+
+        if is_user:
+            bg_color = 0xFF2B5278
+        elif is_diagnostic:
+            bg_color = 0xFF2D1616  # Alerta carmesí para diagnósticos
+        else:
+            bg_color = 0xFF3A3A3A  # Colores nativos especificados
+
         margin_fraction = ui.Fraction(1)
         bubble_fraction = ui.Fraction(4)
 
@@ -651,16 +662,29 @@ class ChatWindow(IChatView):
                                         width=60, height=22,
                                         style={"font_size": 12, "background_color": 0xFF444444}
                                     )
+                                    btn.set_clicked_fn(lambda t=text: self._copy_to_clipboard(t))
 
                             # Burbuja Principal (ZStack con bordes redondeados)
                             with ui.ZStack(width=0):
-                                ui.Rectangle(style={"background_color": bg_color, "border_radius": 8})
+                                bg_rect = ui.Rectangle(style={"background_color": bg_color, "border_radius": 8})
                                 with ui.VStack(padding=12, height=0, spacing=6):
-                                    # Etiqueta con el rol
-                                    role_title = "Usuario" if is_user else ("Agente IA" if role == "assistant" else "Sistema")
-                                    ui.Label(
+                                    # Etiqueta con el rol y badges
+                                    if is_user:
+                                        role_title = "Usuario"
+                                        role_color = 0xFF88C0D0
+                                    elif is_diagnostic:
+                                        role_title = "⚠️ DIAGNÓSTICO DEL SISTEMA"
+                                        role_color = 0xFFFF6B6B
+                                    elif role == "assistant":
+                                        role_title = "Agente IA"
+                                        role_color = 0xFFA3BE8C
+                                    else:
+                                        role_title = "Sistema"
+                                        role_color = 0xFFA3BE8C
+
+                                    role_label = ui.Label(
                                         role_title,
-                                        style={"color": 0xFF88C0D0 if is_user else 0xFFA3BE8C, "font_size": 11, "font_weight": "bold"}
+                                        style={"color": role_color, "font_size": 11, "font_weight": "bold"}
                                     )
 
                                     # Contenido parsed (Texto + Código Markdown)
@@ -694,15 +718,34 @@ class ChatWindow(IChatView):
                                         self._message_labels.append(label_ref)
 
                             if not is_user:
-                                with ui.VStack(width=60):
+                                with ui.VStack(width=90 if is_diagnostic else 60) as action_col:
                                     ui.Spacer()
+                                    settings_btn = None
+                                    if is_diagnostic:
+                                        settings_btn = ui.Button(
+                                            "⚙ Settings",
+                                            width=85, height=22,
+                                            style={"font_size": 11, "background_color": 0xFF007ACC, "border_radius": 3},
+                                            clicked_fn=self._open_settings_dialog,
+                                        )
+                                        ui.Spacer(height=4)
                                     btn = ui.Button(
                                         "Copiar",
-                                        width=60, height=22,
-                                        style={"font_size": 12, "background_color": 0xFF444444}
+                                        width=85 if is_diagnostic else 60, height=22,
+                                        style={"font_size": 11 if is_diagnostic else 12, "background_color": 0xFF444444, "border_radius": 3},
                                     )
+                                    # Dynamically read current text of the bubble at click time so streamed text is copied
+                                    btn.set_clicked_fn(lambda lbl=label_ref, t=text: self._copy_to_clipboard(getattr(lbl, "text", "") or t))
 
-                            btn.set_clicked_fn(lambda t=text: self._copy_to_clipboard(t))
+                                # Store components of the active assistant bubble for dynamic upgrade if error occurs
+                                self._last_assistant_bubble_components = {
+                                    "bg_rect": bg_rect,
+                                    "role_label": role_label,
+                                    "label_ref": label_ref,
+                                    "action_col": action_col,
+                                    "settings_btn": settings_btn,
+                                    "copy_btn": btn,
+                                }
 
                         if not is_user:
                             ui.Spacer()
@@ -711,6 +754,44 @@ class ChatWindow(IChatView):
                     ui.Spacer(width=margin_fraction)
 
         self._scroll_to_bottom()
+
+    def _upgrade_last_bubble_to_diagnostic(self) -> None:
+        """Transforma dinámicamente la última burbuja del asistente en una tarjeta visual de diagnóstico."""
+        comps = self._last_assistant_bubble_components
+        if not comps:
+            return
+        try:
+            bg_rect = comps.get("bg_rect")
+            if bg_rect and hasattr(bg_rect, "style"):
+                bg_rect.style = {"background_color": 0xFF2D1616, "border_radius": 8}
+
+            role_lbl = comps.get("role_label")
+            if role_lbl:
+                if hasattr(role_lbl, "text"):
+                    role_lbl.text = "⚠️ DIAGNÓSTICO DEL SISTEMA"
+                if hasattr(role_lbl, "style"):
+                    role_lbl.style = {"color": 0xFFFF6B6B, "font_size": 11, "font_weight": "bold"}
+
+            action_col = comps.get("action_col")
+            settings_btn = comps.get("settings_btn")
+            if action_col and not settings_btn:
+                with action_col:
+                    new_btn = ui.Button(
+                        "⚙ Settings",
+                        width=85, height=22,
+                        style={"font_size": 11, "background_color": 0xFF007ACC, "border_radius": 3},
+                        clicked_fn=self._open_settings_dialog,
+                    )
+                    comps["settings_btn"] = new_btn
+            elif settings_btn and hasattr(settings_btn, "visible"):
+                settings_btn.visible = True
+
+            copy_btn = comps.get("copy_btn")
+            if copy_btn and hasattr(copy_btn, "style"):
+                copy_btn.style = {"font_size": 11, "background_color": 0xFF444444, "border_radius": 3}
+                copy_btn.width = 85
+        except Exception as e:
+            print(f"[ChatWindow] Error actualizando burbuja a diagnóstico: {e}")
 
     def append_to_last_message(self, chunk: str) -> None:
         """Agrega texto progresivamente a la última burbuja del asistente (Streaming).
@@ -722,6 +803,9 @@ class ChatWindow(IChatView):
             last_label = self._message_labels[-1]
             if hasattr(last_label, "text"):
                 last_label.text += chunk
+                current_text = str(last_label.text)
+                if ("Diagnóstico LM-Chat" in current_text or "Diagnóstico de Conexión" in current_text or current_text.strip().startswith("### ⚠️ Diagnóstico")):
+                    self._upgrade_last_bubble_to_diagnostic()
             self._scroll_to_bottom()
 
     def set_button_state(self, processing: bool) -> None:

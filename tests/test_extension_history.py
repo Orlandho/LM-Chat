@@ -33,6 +33,18 @@ class TestExtensionHistoryIntegration:
         ext._model.set_provider("Ollama")
         assert ext._agent_manager.router.provider == "ollama"
 
+        ext._model.set_provider("Google Gemini API")
+        assert ext._agent_manager.router.provider == "gemini"
+
+        ext._model.set_provider("OpenAI API")
+        assert ext._agent_manager.router.provider == "openai"
+
+        ext._model.set_provider("Claude API")
+        assert ext._agent_manager.router.provider == "claude"
+
+        ext._model.set_provider("NVIDIA Spark")
+        assert ext._agent_manager.router.provider == "nvidia_spark"
+
         # Shutdown limpia las referencias
         ext.on_shutdown()
         assert ext._chat_window is None

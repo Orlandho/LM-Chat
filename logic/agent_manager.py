@@ -4,7 +4,8 @@
 Agent Manager Module for Omniverse Agentic AI System.
 
 Orchestrates conversation history, inference routing across providers,
-and the ReAct Reflection Loop for autonomous OpenUSD code generation and execution.
+structured logging, diagnostic error handling, and the ReAct Reflection Loop
+for autonomous OpenUSD code generation and execution.
 """
 
 import asyncio
@@ -12,9 +13,12 @@ import re
 from typing import Optional, Callable, Dict, Any, List
 from .inference_router import InferenceRouter
 from .usd_controller import USDController
+from logic.logger import get_logger
+from logic.diagnostics import diagnose_inference_failure, ErrorDiagnostic
 
 # Pre-compiled regular expression pattern for Python code block extraction
 _PYTHON_CODE_PATTERN = re.compile(r"```python\s*(.*?)\s*```", re.DOTALL)
+logger = get_logger("AgentManager")
 
 
 class AgentManager:
@@ -54,6 +58,7 @@ class AgentManager:
         self._messages: List[Dict[str, str]] = [
             {"role": "system", "content": self._system_prompt}
         ]
+        logger.info(f"AgentManager inicializado con router={self._router.provider} ({self._router.model})")
 
     @property
     def router(self) -> InferenceRouter:
@@ -71,11 +76,12 @@ class AgentManager:
         Updates the underlying inference provider configuration.
 
         Args:
-            provider (str): Provider identifier ('lm_studio', 'ollama', 'vllm', 'cloud').
+            provider (str): Provider identifier ('lm_studio', 'ollama', 'vllm', 'cloud', etc.).
             base_url (Optional[str]): Base URL override.
             model (Optional[str]): Model identifier.
             api_key (Optional[str]): API key for cloud providers.
         """
+        logger.info(f"Cambiando proveedor de AgentManager a {provider} ({model})")
         self._router.set_provider(
             provider=provider, base_url=base_url, model=model, api_key=api_key
         )
@@ -102,10 +108,12 @@ class AgentManager:
             elif role == "system" and content and content != self._system_prompt:
                 self._messages[0]["content"] = content
 
+        logger.debug(f"Contexto conversacional cargado: {len(self._messages)} mensajes en memoria")
+
     def reset_conversation(self) -> None:
         """Reinicia el contexto de conversación reteniendo el system prompt."""
         self._messages = [{"role": "system", "content": self._system_prompt}]
-
+        logger.info("Conversación reiniciada reteniendo system prompt")
 
     async def process_prompt(
         self,
@@ -125,6 +133,7 @@ class AgentManager:
             str: Final response string or error summary.
         """
         self._messages.append({"role": "user", "content": prompt})
+        logger.info(f"Procesando prompt de usuario: '{prompt[:60]}...'")
 
         max_retries = 2
 
@@ -150,27 +159,41 @@ class AgentManager:
                     else:
                         error_occurred = True
                         error_type = chunk_obj.get("error_type")
-                        if error_type == "HTTPError":
+                        diagnostic_md = chunk_obj.get("diagnostic_md")
+
+                        if diagnostic_md:
+                            error_message = diagnostic_md
+                        elif error_type == "HTTPError":
                             error_message = chunk_obj.get("message", "Error de HTTP")
                         elif error_type == "ConnectionError":
                             error_message = chunk_obj.get("message", "Error de conexión")
                         elif error_type == "TimeoutError":
                             error_message = chunk_obj.get("message", "Tiempo de espera agotado")
                         else:
-                            print(f"[omni.lm_chat] Error: {chunk_obj.get('message')}")
-                            error_message = f"Excepción en petición LLM: {chunk_obj.get('message')}"
+                            raw_msg = chunk_obj.get("message", "Fallo desconocido")
+                            error_message = f"Excepción en petición LLM: {raw_msg}"
+
+                        logger.warning(
+                            f"Fallo en inferencia streaming [{error_type}]: {chunk_obj.get('message', '')[:100]}"
+                        )
                         break
 
                 if error_occurred:
+                    logger.error(f"Inferencia abortada por error en el proveedor {self._router.provider}")
+                    if append_callback:
+                        append_callback(error_message)
                     return error_message
 
                 # Wait briefly for UI refresh
                 await asyncio.sleep(0.1)
 
                 # Check for python code to execute using pre-compiled regex
-                match = _PYTHON_CODE_PATTERN.search(full_content)
-                if match:
-                    extracted_code = match.group(1).strip()
+                # Strip reasoning thinking tags (<think>...</think>) from DeepSeek-R1 to avoid executing draft code
+                cleaned_content = re.sub(r"<think>.*?</think>", "", full_content, flags=re.DOTALL)
+                matches = _PYTHON_CODE_PATTERN.findall(cleaned_content)
+                if matches:
+                    extracted_code = matches[-1].strip()
+                    logger.info("Detectado bloque de código OpenUSD generado por el modelo. Ejecutando...")
                     exec_result = self._usd_controller.execute_code(extracted_code)
 
                     if exec_result.get("success"):
@@ -178,11 +201,11 @@ class AgentManager:
                         success_msg = "\n\n[Sistema: Código ejecutado exitosamente]"
                         if append_callback:
                             append_callback(success_msg)
+                        logger.info("Código OpenUSD ejecutado con éxito")
                         return full_content + success_msg
                     else:
                         error_msg = exec_result.get("error_msg")
-                        print(f"[omni.lm_chat] Error en la ejecución del código: {error_msg}")
-                        print(f"[omni.lm_chat] Código que falló:\n{extracted_code}")
+                        logger.warning(f"Error en ejecución OpenUSD: {error_msg}")
 
                         if attempt < max_retries:
                             retry_msg = f"\n\n[Sistema: Error detectado. Intento de autocorrección {attempt + 1} de {max_retries}...]"
@@ -208,7 +231,7 @@ class AgentManager:
                             final_err = f"\n\n[Sistema: Se agotaron los reintentos. Último error: {error_msg}]"
                             if append_callback:
                                 append_callback(final_err)
-                            print(f"[omni.lm_chat] {final_err}")
+                            logger.error(f"Reintentos agotados en ReAct loop: {error_msg}")
                             return full_content + final_err
                 else:
                     # Normal conversation without code
@@ -216,7 +239,17 @@ class AgentManager:
                     return full_content
 
             except Exception as e:
-                print(f"[omni.lm_chat] Error asíncrono en AgentManager: {e}")
-                return f"Excepción en la ejecución asíncrona: {str(e)}"
+                logger.error(f"Error asíncrono no controlado en AgentManager: {e}", exc_info=e)
+                diag = diagnose_inference_failure(
+                    provider=self._router.provider,
+                    model=self._router.model,
+                    base_url=self._router.base_url,
+                    error_type=type(e).__name__,
+                    raw_error=str(e),
+                )
+                diag_md = diag.to_markdown()
+                if append_callback:
+                    append_callback(diag_md)
+                return diag_md
 
         return "Flujo finalizado inesperadamente."

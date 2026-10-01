@@ -23,20 +23,22 @@ class ChatModel:
         "OpenAI API",
         "Claude API",
         "NVIDIA Spark",
+        "Google Gemini API",
         "vLLM",
         "Nemotron",
         "Cloud APIs",
     ]
 
     DEFAULT_MODELS_MAP: Dict[str, List[str]] = {
-        "LM Studio": ["local-model", "qwen2.5-coder-7b", "deepseek-r1-distill-qwen-14b", "llama-3.2-3b-instruct"],
-        "Ollama": ["llama3:latest", "llama3.3:latest", "llama3.1:8b", "codellama:7b", "mistral:latest", "qwen2.5-coder:7b", "deepseek-r1:8b"],
-        "OpenAI API": ["gpt-4o", "gpt-4o-mini", "o3-mini", "o1", "gpt-4-turbo"],
-        "Claude API": ["claude-3-7-sonnet-latest", "claude-3-5-sonnet-latest", "claude-3-5-haiku-latest", "claude-3-opus-latest"],
-        "NVIDIA Spark": ["nvidia/llama-3.1-nemotron-70b-instruct", "meta/llama-3.1-70b-instruct", "meta/llama-3.1-405b-instruct", "nvidia/nemotron-4-340b-instruct", "mistralai/mixtral-8x22b-instruct-v0.1"],
+        "LM Studio": ["local-model", "qwen2.5-coder-7b", "qwen2.5-coder-14b", "qwen2.5-coder-32b", "deepseek-r1-distill-qwen-14b", "deepseek-r1-distill-qwen-32b", "llama-3.2-3b-instruct", "llama-3.3-70b-instruct"],
+        "Ollama": ["llama3.3:latest", "llama3:latest", "llama3.1:8b", "qwen2.5-coder:7b", "qwen2.5-coder:14b", "qwen2.5-coder:32b", "deepseek-r1:8b", "deepseek-r1:14b", "deepseek-r1:32b", "codellama:7b", "mistral:latest"],
+        "OpenAI API": ["gpt-4o", "gpt-4o-mini", "o3-mini", "o1", "o1-mini", "gpt-4.5-preview", "gpt-4-turbo"],
+        "Claude API": ["claude-3-7-sonnet-latest", "claude-3-5-sonnet-latest", "claude-3-5-haiku-latest", "claude-3-5-opus-latest", "claude-3-opus-latest"],
+        "NVIDIA Spark": ["nvidia/llama-3.1-nemotron-70b-instruct", "meta/llama-3.1-70b-instruct", "meta/llama-3.1-405b-instruct", "nvidia/nemotron-4-340b-instruct", "mistralai/mixtral-8x22b-instruct-v0.1", "deepseek-ai/deepseek-r1"],
+        "Google Gemini API": ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"],
         "vLLM": ["meta-llama/Meta-Llama-3-8B-Instruct", "Qwen/Qwen2.5-Coder-32B-Instruct"],
         "Nemotron": ["nvidia/nemotron-4-340b-instruct"],
-        "Cloud APIs": ["gpt-4o", "claude-3-5-sonnet", "gemini-1.5-pro"],
+        "Cloud APIs": ["gpt-4o", "claude-3-7-sonnet-latest", "claude-3-5-sonnet-latest", "gemini-2.0-flash"],
     }
 
     def __init__(
@@ -167,6 +169,10 @@ class ChatModel:
         if norm_query in ("nvidia", "nvidiaspark", "spark", "dgxspark", "nemotron"):
             for p in self._providers:
                 if "nvidia" in p.lower() or "spark" in p.lower() or "nemotron" in p.lower():
+                    return p
+        if norm_query in ("gemini", "google", "googlegemini", "geminiapi", "googlegeminiapi"):
+            for p in self._providers:
+                if "gemini" in p.lower():
                     return p
         return None
 
