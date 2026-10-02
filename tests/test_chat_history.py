@@ -310,3 +310,24 @@ class TestLocalChatHistoryManager:
         res_model = mgr.search_sessions("nemotron")
         assert len(res_model) == 1
         assert res_model[0]["session_id"] == s1.session_id
+
+    def test_import_session_json_sanitizes_path_traversal_session_id(self, tmp_path):
+        mgr = LocalChatHistoryManager(storage_dir=str(tmp_path))
+        malicious_json = json.dumps({
+            "session_id": "../../../etc/passwd",
+            "title": "Malicious Import",
+            "messages": [{"role": "user", "content": "Hello"}]
+        })
+
+        session = mgr.import_session_json(malicious_json)
+        assert session is not None
+        assert ".." not in session.session_id
+        assert "/" not in session.session_id
+        assert "\\" not in session.session_id
+        assert session.session_id == "etcpasswd"
+
+        # Check persisted session on disk
+        persisted = mgr.get_session("etcpasswd")
+        assert persisted is not None
+        assert persisted.session_id == "etcpasswd"
+        assert persisted.title == "Malicious Import"
