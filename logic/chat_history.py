@@ -359,8 +359,13 @@ class LocalChatHistoryManager(IChatHistoryManager):
             if not isinstance(data, dict):
                 return None
 
-            # Si no tiene session_id o ya existe, asignar uno nuevo para evitar sobreescritura accidental
+            # Sanitizar session_id previo a la validación para prevenir inyección de directory traversal
             session_id = data.get("session_id")
+            if session_id and isinstance(session_id, str):
+                session_id = self._sanitize_session_id(session_id)
+                data["session_id"] = session_id
+
+            # Si no tiene session_id o ya existe, asignar uno nuevo para evitar sobreescritura accidental
             if not session_id or self.get_session(session_id) is not None:
                 data["session_id"] = uuid.uuid4().hex
 
