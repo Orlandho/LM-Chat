@@ -310,3 +310,34 @@ class TestLocalChatHistoryManager:
         res_model = mgr.search_sessions("nemotron")
         assert len(res_model) == 1
         assert res_model[0]["session_id"] == s1.session_id
+
+    def test_sanitize_session_id_non_string_inputs(self, tmp_path):
+        mgr = LocalChatHistoryManager(storage_dir=str(tmp_path))
+        # Non-string inputs must return valid UUID string without raising TypeError
+        safe_null = mgr._sanitize_session_id(None)
+        assert isinstance(safe_null, str) and len(safe_null) > 0
+
+        safe_int = mgr._sanitize_session_id(12345)
+        assert isinstance(safe_int, str) and len(safe_int) > 0
+
+        safe_list = mgr._sanitize_session_id(["invalid"])
+        assert isinstance(safe_list, str) and len(safe_list) > 0
+
+    def test_import_session_json_sanitizes_path_traversal(self, tmp_path):
+        mgr = LocalChatHistoryManager(storage_dir=str(tmp_path))
+        malicious_json = json.dumps({
+            "session_id": "../../../etc/passwd",
+            "title": "Malicious Session Import",
+            "messages": [{"role": "user", "content": "Attempting path traversal"}],
+        })
+
+        session = mgr.import_session_json(malicious_json)
+        assert session is not None
+        # Session ID must be sanitized and free of path traversal sequences
+        assert ".." not in session.session_id
+        assert "/" not in session.session_id
+        assert "\\" not in session.session_id
+
+        # Saved file must be safely stored in storage_dir
+        expected_file = tmp_path / f"{session.session_id}.json"
+        assert expected_file.exists()
