@@ -126,7 +126,7 @@ class InferenceRouter:
 
     def get_endpoint_url(self, path: str = "/chat/completions") -> str:
         """
-        Constructs full URL for an API endpoint path.
+        Constructs full URL for an API endpoint path with CRLF sanitization.
 
         Args:
             path (str): Endpoint path relative to base_url.
@@ -134,7 +134,8 @@ class InferenceRouter:
         Returns:
             str: Full URL.
         """
-        clean_path = path if path.startswith("/") else f"/{path}"
+        sanitized_path = path.strip().replace("\r", "").replace("\n", "") if path else ""
+        clean_path = sanitized_path if sanitized_path.startswith("/") else f"/{sanitized_path}"
         return f"{self._base_url}{clean_path}"
 
     def get_headers(self) -> Dict[str, str]:

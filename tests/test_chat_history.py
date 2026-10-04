@@ -28,6 +28,19 @@ class TestLocalChatHistoryManager:
         assert target_dir.exists()
         assert mgr.storage_dir == str(target_dir)
 
+    def test_restricted_file_and_directory_permissions(self, tmp_path):
+        target_dir = tmp_path / "secure_sessions"
+        mgr = LocalChatHistoryManager(storage_dir=str(target_dir))
+        session = mgr.create_session(title="Secure Session")
+
+        if os.name == "posix":
+            dir_mode = os.stat(str(target_dir)).st_mode & 0o777
+            assert dir_mode == 0o700
+
+            file_path = target_dir / f"{session.session_id}.json"
+            file_mode = os.stat(str(file_path)).st_mode & 0o777
+            assert file_mode == 0o600
+
     def test_create_session_defaults(self, tmp_path):
         mgr = LocalChatHistoryManager(storage_dir=str(tmp_path))
         session = mgr.create_session()

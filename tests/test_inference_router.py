@@ -71,6 +71,11 @@ class TestInferenceRouter(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(headers_cloud.get("Content-Type"), "application/json; charset=utf-8")
         self.assertEqual(headers_cloud.get("Authorization"), "Bearer sk-test-key-12345")
 
+    def test_get_endpoint_url_crlf_sanitization(self):
+        """Test that CRLF characters in endpoint path are stripped."""
+        url = self.router_lm.get_endpoint_url("/chat/completions\r\nInjected: bad")
+        self.assertEqual(url, "http://localhost:1234/v1/chat/completionsInjected: bad")
+
     def test_set_provider_dynamic_switch(self):
         """Test dynamically switching providers on an existing router."""
         router = InferenceRouter(provider="lm_studio")
