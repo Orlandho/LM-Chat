@@ -354,15 +354,29 @@ class LocalChatHistoryManager(IChatHistoryManager):
         Returns:
             Optional[ChatSession]: Sesión importada o None si el JSON es inválido.
         """
+        if not isinstance(json_content, str) or not json_content.strip():
+            return None
+
+        # Security: Enforce max payload limit (5MB) to prevent memory/CPU exhaustion DoS
+        if len(json_content) > 5_000_000:
+            print("[LocalChatHistoryManager] Error importando sesión: Payload excede el límite máximo.")
+            return None
+
         try:
             data = json.loads(json_content)
             if not isinstance(data, dict):
                 return None
 
-            # Si no tiene session_id o ya existe, asignar uno nuevo para evitar sobreescritura accidental
+            # Security: Sanitize session_id to prevent directory traversal sequences
             session_id = data.get("session_id")
+            if session_id:
+                session_id = self._sanitize_session_id(str(session_id))
+
+            # Si no tiene session_id válido o ya existe, asignar uno nuevo para evitar sobreescritura accidental
             if not session_id or self.get_session(session_id) is not None:
-                data["session_id"] = uuid.uuid4().hex
+                session_id = uuid.uuid4().hex
+
+            data["session_id"] = session_id
 
             session = ChatSession.from_dict(data)
             session.updated_at = self._current_timestamp()

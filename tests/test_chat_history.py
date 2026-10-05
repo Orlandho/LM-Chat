@@ -310,3 +310,23 @@ class TestLocalChatHistoryManager:
         res_model = mgr.search_sessions("nemotron")
         assert len(res_model) == 1
         assert res_model[0]["session_id"] == s1.session_id
+
+    def test_import_session_json_sanitizes_session_id_and_limits_size(self, tmp_path):
+        mgr = LocalChatHistoryManager(storage_dir=str(tmp_path))
+
+        # Payload con session_id con directory traversal y caracteres inseguros
+        malicious_json = json.dumps({
+            "session_id": "../../etc/passwd_exploit",
+            "title": "Imported Malicious",
+            "messages": [{"role": "user", "content": "hello"}]
+        })
+
+        session = mgr.import_session_json(malicious_json)
+        assert session is not None
+        assert ".." not in session.session_id
+        assert "/" not in session.session_id
+        assert "passwd_exploit" in session.session_id
+
+        # Payload con tamaño excesivo (> 5MB)
+        huge_payload = json.dumps({"session_id": "huge", "content": "x" * 5_000_001})
+        assert mgr.import_session_json(huge_payload) is None
