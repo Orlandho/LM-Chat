@@ -133,20 +133,23 @@ class LocalChatHistoryManager(IChatHistoryManager):
             print(f"[LocalChatHistoryManager] Error leyendo sesión {session_id}: {e}")
             return None
 
-    def list_sessions(self) -> List[Dict[str, Any]]:
-        """Lista los metadatos resumidos de todas las sesiones ordenadas cronológicamente.
+    def _load_raw_sessions(self) -> List[Dict[str, Any]]:
+        """Carga y procesa en una sola pasada todos los archivos de sesión desde el disco.
+
+        Optimization: Loads raw JSON session data once to avoid redundant file I/O operations
+        and dataclass allocations during session listing and context searching.
 
         Returns:
-            List[Dict[str, Any]]: Lista de resúmenes de sesión ordenados por updated_at descendente.
+            List[Dict[str, Any]]: Lista de objetos con 'summary' y 'messages' sin instanciar objetos.
         """
         self._ensure_storage_dir()
-        summaries: List[Dict[str, Any]] = []
+        raw_sessions: List[Dict[str, Any]] = []
 
         try:
             filenames = os.listdir(self._storage_dir)
         except OSError as e:
             print(f"[LocalChatHistoryManager] Error listando directorio {self._storage_dir}: {e}")
-            return summaries
+            return raw_sessions
 
         for fname in filenames:
             if not fname.endswith(".json") or fname.startswith("."):
@@ -184,7 +187,7 @@ class LocalChatHistoryManager(IChatHistoryManager):
                         content = str(last_msg)
                     last_msg_snippet = content[:60] + ("..." if len(content) > 60 else "")
 
-                summaries.append({
+                summary = {
                     "session_id": session_id,
                     "title": title,
                     "created_at": created_at,
@@ -192,6 +195,11 @@ class LocalChatHistoryManager(IChatHistoryManager):
                     "message_count": len(messages),
                     "last_message": last_msg_snippet,
                     "metadata": metadata,
+                }
+
+                raw_sessions.append({
+                    "summary": summary,
+                    "messages": messages,
                 })
             except (json.JSONDecodeError, OSError, UnicodeDecodeError, AttributeError, Exception) as e:
                 # Omitir archivos temporales rotos o corruptos
@@ -199,8 +207,17 @@ class LocalChatHistoryManager(IChatHistoryManager):
                 continue
 
         # Ordenar por updated_at más reciente primero
-        summaries.sort(key=lambda s: s.get("updated_at", ""), reverse=True)
-        return summaries
+        raw_sessions.sort(key=lambda item: item["summary"].get("updated_at", ""), reverse=True)
+        return raw_sessions
+
+    def list_sessions(self) -> List[Dict[str, Any]]:
+        """Lista los metadatos resumidos de todas las sesiones ordenadas cronológicamente.
+
+        Returns:
+            List[Dict[str, Any]]: Lista de resúmenes de sesión ordenados por updated_at descendente.
+        """
+        raw_sessions = self._load_raw_sessions()
+        return [item["summary"] for item in raw_sessions]
 
     def save_session(self, session: ChatSession) -> bool:
         """Persiste una sesión en el almacenamiento local de forma atómica.
@@ -280,6 +297,9 @@ class LocalChatHistoryManager(IChatHistoryManager):
     def search_sessions(self, query: str) -> List[Dict[str, Any]]:
         """Busca sesiones que coincidan en título, contenido de mensajes o metadatos.
 
+        Optimization: Performs search directly on raw session dicts loaded in a single pass,
+        reducing disk I/O operations by 50% and avoiding ChatSession/ChatMessage object allocations.
+
         Args:
             query (str): Término de búsqueda.
 
@@ -292,7 +312,11 @@ class LocalChatHistoryManager(IChatHistoryManager):
         normalized_query = query.strip().lower()
         results: List[Dict[str, Any]] = []
 
-        for summary in self.list_sessions():
+        raw_sessions = self._load_raw_sessions()
+
+        for item in raw_sessions:
+            summary = item["summary"]
+            messages = item["messages"]
             matched = False
             match_snippets: List[str] = []
 
@@ -314,20 +338,31 @@ class LocalChatHistoryManager(IChatHistoryManager):
                             matched = True
                             match_snippets.append(f"Etiqueta: {item_val}")
 
-            # Coincidencia en contenido de mensajes
-            session = self.get_session(summary["session_id"])
-            if session:
-                for msg in session.messages:
-                    msg_content = msg.content if isinstance(msg.content, str) else str(msg.content or "")
-                    if normalized_query in msg_content.lower():
-                        matched = True
-                        snippet = msg_content[:80] + ("..." if len(msg_content) > 80 else "")
-                        match_snippets.append(f"[{msg.role}]: {snippet}")
+            # Coincidencia en contenido de mensajes directamente desde el diccionario cargado
+            for msg in messages:
+                if isinstance(msg, dict):
+                    role = msg.get("role", "user")
+                    content = msg.get("content", "")
+                elif hasattr(msg, "content"):
+                    role = getattr(msg, "role", "user")
+                    content = getattr(msg, "content", "")
+                elif isinstance(msg, str):
+                    role = "user"
+                    content = msg
+                else:
+                    role = "user"
+                    content = str(msg)
+
+                msg_content = content if isinstance(content, str) else str(content or "")
+                if normalized_query in msg_content.lower():
+                    matched = True
+                    snippet = msg_content[:80] + ("..." if len(msg_content) > 80 else "")
+                    match_snippets.append(f"[{role}]: {snippet}")
 
             if matched:
-                item = dict(summary)
-                item["matches"] = match_snippets
-                results.append(item)
+                match_item = dict(summary)
+                match_item["matches"] = match_snippets
+                results.append(match_item)
 
         return results
 

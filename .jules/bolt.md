@@ -15,3 +15,9 @@
 **Learning:** In `asyncio.subprocess` stream reader loops (e.g., stdio MCP listeners), calling `readline()` on a closed or terminated subprocess stream returns empty bytes (`b""`). Continuously calling `readline()` after EOF returns `b""` immediately without blocking. Doing `if not line: await asyncio.sleep(0.01); continue` creates an infinite busy-polling loop running 100 Hz that burns CPU, wastes memory, and blocks pending request cleanup.
 
 **Action:** Always `break` out of `readline()` loops when `not line` is encountered to gracefully terminate reader tasks upon stream EOF.
+
+## 2026-03-31 - Single-Pass Session Storage Scanning & Raw Dict Searching
+
+**Learning:** When searching chat session history, calling `list_sessions()` (which reads all session JSON files from disk) followed by calling `get_session()` for each summary results in **2N file open/read/close operations** and creates thousands of redundant `ChatSession` and `ChatMessage` dataclass instances in memory. Refactoring history listing and searching into a single pass over raw JSON dictionaries eliminates 50% of disk I/O reads and avoids unnecessary object allocations.
+
+**Action:** Scan session storage files in a single pass (`_load_raw_sessions()`) and perform context search directly on raw dictionaries rather than re-reading files from disk and instantiating full object graphs.
