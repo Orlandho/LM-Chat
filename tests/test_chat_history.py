@@ -310,3 +310,34 @@ class TestLocalChatHistoryManager:
         res_model = mgr.search_sessions("nemotron")
         assert len(res_model) == 1
         assert res_model[0]["session_id"] == s1.session_id
+
+    def test_import_and_save_session_sanitizes_session_id(self, tmp_path):
+        mgr = LocalChatHistoryManager(storage_dir=str(tmp_path))
+
+        # Importar JSON con session_id malicioso
+        malicious_json = json.dumps({
+            "session_id": "../../../etc/passwd",
+            "title": "Malicious Session",
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-01T00:00:00Z",
+            "messages": []
+        })
+
+        imported = mgr.import_session_json(malicious_json)
+        assert imported is not None
+        assert ".." not in imported.session_id
+        assert "/" not in imported.session_id
+        assert "\\" not in imported.session_id
+
+        # Guardar sesión con session_id con caracteres invalidos
+        custom_session = ChatSession(
+            session_id="../../malicious_path_session",
+            title="Session with unsafe id",
+            created_at="2026-01-01T00:00:00Z",
+            updated_at="2026-01-01T00:00:00Z",
+            messages=[]
+        )
+        saved = mgr.save_session(custom_session)
+        assert saved is True
+        assert ".." not in custom_session.session_id
+        assert "/" not in custom_session.session_id

@@ -135,6 +135,7 @@ class InferenceRouter:
             str: Full URL.
         """
         clean_path = path if path.startswith("/") else f"/{path}"
+        clean_path = clean_path.replace("\r", "").replace("\n", "")
         return f"{self._base_url}{clean_path}"
 
     def get_headers(self) -> Dict[str, str]:

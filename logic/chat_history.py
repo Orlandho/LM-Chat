@@ -212,6 +212,7 @@ class LocalChatHistoryManager(IChatHistoryManager):
             bool: True si la escritura atómica fue exitosa, False en caso de error.
         """
         self._ensure_storage_dir()
+        session.session_id = self._sanitize_session_id(session.session_id)
         file_path = self._get_session_path(session.session_id)
         tmp_path = os.path.join(
             self._storage_dir, f".{self._sanitize_session_id(session.session_id)}.{os.getpid()}.tmp"
@@ -361,7 +362,12 @@ class LocalChatHistoryManager(IChatHistoryManager):
 
             # Si no tiene session_id o ya existe, asignar uno nuevo para evitar sobreescritura accidental
             session_id = data.get("session_id")
-            if not session_id or self.get_session(session_id) is not None:
+            if session_id:
+                data["session_id"] = self._sanitize_session_id(str(session_id))
+            else:
+                data["session_id"] = uuid.uuid4().hex
+
+            if self.get_session(data["session_id"]) is not None:
                 data["session_id"] = uuid.uuid4().hex
 
             session = ChatSession.from_dict(data)

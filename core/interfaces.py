@@ -6,6 +6,7 @@ Contratos e interfaces fundamentales de la suite LM-Chat™.
 Diseñados para permitir el desarrollo concurrente y desacoplado por el Enjambre de Jules.
 """
 
+import re
 import uuid
 from datetime import datetime, timezone
 from abc import ABC, abstractmethod
@@ -93,7 +94,11 @@ class ChatSession:
             elif isinstance(m, str):
                 msgs.append(ChatMessage(role="user", content=m))
 
-        sid = data.get("session_id") or uuid.uuid4().hex
+        raw_sid = data.get("session_id")
+        if isinstance(raw_sid, str) and raw_sid.strip():
+            sid = re.sub(r"[^a-zA-Z0-9_\-]", "", raw_sid) or uuid.uuid4().hex
+        else:
+            sid = uuid.uuid4().hex
         created = data.get("created_at") or now_iso
         updated = data.get("updated_at") or created
         title = data.get("title") or "Nueva Conversación"
