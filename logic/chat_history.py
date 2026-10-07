@@ -219,9 +219,11 @@ class LocalChatHistoryManager(IChatHistoryManager):
 
         try:
             # Serialización en archivo temporal
+            # Optimization: Compact JSON serialization reduces session file disk footprint
+            # and eliminates formatting overhead during disk writes.
             data = session.to_dict()
             with open(tmp_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+                json.dump(data, f, ensure_ascii=False)
                 f.flush()
                 os.fsync(f.fileno())
 
@@ -292,43 +294,113 @@ class LocalChatHistoryManager(IChatHistoryManager):
         normalized_query = query.strip().lower()
         results: List[Dict[str, Any]] = []
 
-        for summary in self.list_sessions():
-            matched = False
-            match_snippets: List[str] = []
+        self._ensure_storage_dir()
+        try:
+            filenames = os.listdir(self._storage_dir)
+        except OSError as e:
+            print(f"[LocalChatHistoryManager] Error listando directorio {self._storage_dir}: {e}")
+            return results
 
-            # Coincidencia en título
-            title = summary.get("title", "")
-            if normalized_query in title.lower():
-                matched = True
-                match_snippets.append(f"Título: {title}")
+        # Optimization: Single-pass file traversal parses each session JSON file ONCE.
+        # Avoids calling self.list_sessions() and then re-reading/re-parsing every session file
+        # with self.get_session(), cutting disk I/O and JSON parsing overhead by 50%.
+        for fname in filenames:
+            if not fname.endswith(".json") or fname.startswith("."):
+                continue
 
-            # Coincidencia en metadatos (proveedor, modelo, tags)
-            meta = summary.get("metadata") or {}
-            for k, v in meta.items():
-                if isinstance(v, str) and normalized_query in v.lower():
+            file_path = os.path.join(self._storage_dir, fname)
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+
+                if not isinstance(data, dict):
+                    continue
+
+                session_id = data.get("session_id", fname[:-5])
+                title = data.get("title") or self.DEFAULT_TITLE
+                created_at = data.get("created_at", "")
+                updated_at = data.get("updated_at") or created_at
+                messages = data.get("messages")
+                if not isinstance(messages, list):
+                    messages = []
+                metadata = data.get("metadata")
+                if not isinstance(metadata, dict):
+                    metadata = {}
+
+                last_msg_snippet = ""
+                if messages:
+                    last_msg = messages[-1]
+                    if isinstance(last_msg, dict):
+                        content = last_msg.get("content", "")
+                    elif hasattr(last_msg, "content"):
+                        content = getattr(last_msg, "content", "")
+                    elif isinstance(last_msg, str):
+                        content = last_msg
+                    else:
+                        content = str(last_msg)
+                    last_msg_snippet = content[:60] + ("..." if len(content) > 60 else "")
+
+                summary = {
+                    "session_id": session_id,
+                    "title": title,
+                    "created_at": created_at,
+                    "updated_at": updated_at,
+                    "message_count": len(messages),
+                    "last_message": last_msg_snippet,
+                    "metadata": metadata,
+                }
+
+                matched = False
+                match_snippets: List[str] = []
+
+                # Coincidencia en título
+                if normalized_query in title.lower():
                     matched = True
-                    match_snippets.append(f"Metadatos ({k}): {v}")
-                elif isinstance(v, list):
-                    for item_val in v:
-                        if isinstance(item_val, str) and normalized_query in item_val.lower():
-                            matched = True
-                            match_snippets.append(f"Etiqueta: {item_val}")
+                    match_snippets.append(f"Título: {title}")
 
-            # Coincidencia en contenido de mensajes
-            session = self.get_session(summary["session_id"])
-            if session:
-                for msg in session.messages:
-                    msg_content = msg.content if isinstance(msg.content, str) else str(msg.content or "")
+                # Coincidencia en metadatos (proveedor, modelo, tags)
+                for k, v in metadata.items():
+                    if isinstance(v, str) and normalized_query in v.lower():
+                        matched = True
+                        match_snippets.append(f"Metadatos ({k}): {v}")
+                    elif isinstance(v, list):
+                        for item_val in v:
+                            if isinstance(item_val, str) and normalized_query in item_val.lower():
+                                matched = True
+                                match_snippets.append(f"Etiqueta: {item_val}")
+
+                # Coincidencia en contenido de mensajes
+                for msg in messages:
+                    if isinstance(msg, dict):
+                        role = msg.get("role", "user")
+                        content = msg.get("content", "")
+                    elif hasattr(msg, "role") and hasattr(msg, "content"):
+                        role = getattr(msg, "role", "user")
+                        content = getattr(msg, "content", "")
+                    elif isinstance(msg, str):
+                        role = "user"
+                        content = msg
+                    else:
+                        role = "user"
+                        content = str(msg)
+
+                    msg_content = content if isinstance(content, str) else str(content or "")
                     if normalized_query in msg_content.lower():
                         matched = True
                         snippet = msg_content[:80] + ("..." if len(msg_content) > 80 else "")
-                        match_snippets.append(f"[{msg.role}]: {snippet}")
+                        match_snippets.append(f"[{role}]: {snippet}")
 
-            if matched:
-                item = dict(summary)
-                item["matches"] = match_snippets
-                results.append(item)
+                if matched:
+                    item = dict(summary)
+                    item["matches"] = match_snippets
+                    results.append(item)
 
+            except (json.JSONDecodeError, OSError, UnicodeDecodeError, AttributeError, Exception) as e:
+                print(f"[LocalChatHistoryManager] Archivo corrupto ignorado {fname}: {e}")
+                continue
+
+        # Ordenar por updated_at más reciente primero
+        results.sort(key=lambda s: s.get("updated_at", ""), reverse=True)
         return results
 
     def export_session_json(self, session_id: str) -> Optional[str]:
