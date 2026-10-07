@@ -48,9 +48,12 @@ class LocalChatHistoryManager(IChatHistoryManager):
         return self._storage_dir
 
     def _ensure_storage_dir(self) -> None:
-        """Crea el directorio de almacenamiento si no existe."""
+        """Crea el directorio de almacenamiento si no existe y asegura permisos restringidos."""
         try:
             os.makedirs(self._storage_dir, exist_ok=True)
+            if os.name == "posix":
+                # Security: Restrict directory permissions to owner only (rwx------)
+                os.chmod(self._storage_dir, 0o700)
         except Exception as e:
             print(f"[LocalChatHistoryManager] Error creando directorio {self._storage_dir}: {e}")
 
@@ -225,8 +228,17 @@ class LocalChatHistoryManager(IChatHistoryManager):
                 f.flush()
                 os.fsync(f.fileno())
 
+            if os.name == "posix":
+                # Security: Restrict temporary file permissions to owner only (rw-------)
+                os.chmod(tmp_path, 0o600)
+
             # Reemplazo atómico para evitar corrupción por caídas abruptas
             os.replace(tmp_path, file_path)
+
+            if os.name == "posix":
+                # Security: Enforce restricted file permissions after atomic replacement
+                os.chmod(file_path, 0o600)
+
             return True
         except (OSError, TypeError, ValueError, AttributeError, Exception) as e:
             print(f"[LocalChatHistoryManager] Error guardando sesión {session.session_id}: {e}")

@@ -310,3 +310,18 @@ class TestLocalChatHistoryManager:
         res_model = mgr.search_sessions("nemotron")
         assert len(res_model) == 1
         assert res_model[0]["session_id"] == s1.session_id
+
+    def test_storage_permissions_posix(self, tmp_path):
+        target_dir = tmp_path / "secure_sessions"
+        mgr = LocalChatHistoryManager(storage_dir=str(target_dir))
+        session = mgr.create_session(title="Sesión Permisos")
+
+        if os.name == "posix":
+            # Verificar que el directorio tiene permisos 0700 (rwx------)
+            dir_mode = os.stat(target_dir).st_mode & 0o777
+            assert dir_mode == 0o700
+
+            # Verificar que el archivo JSON de sesión tiene permisos 0600 (rw-------)
+            file_path = target_dir / f"{session.session_id}.json"
+            file_mode = os.stat(file_path).st_mode & 0o777
+            assert file_mode == 0o600
