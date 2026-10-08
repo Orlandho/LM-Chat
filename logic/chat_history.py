@@ -21,6 +21,8 @@ class LocalChatHistoryManager(IChatHistoryManager):
     """Implementación local y desacoplada del historial de conversaciones."""
 
     DEFAULT_TITLE = "Nueva Conversación"
+    # Security: Maximum JSON payload limit (5MB) for import to prevent DoS via memory/CPU exhaustion
+    MAX_IMPORT_SIZE: int = 5_000_000
 
     def __init__(self, storage_dir: Optional[str] = None) -> None:
         """Inicializa el gestor de historial local.
@@ -354,15 +356,31 @@ class LocalChatHistoryManager(IChatHistoryManager):
         Returns:
             Optional[ChatSession]: Sesión importada o None si el JSON es inválido.
         """
+        # Security: Input validation to prevent non-string or empty input execution
+        if not isinstance(json_content, str) or not json_content.strip():
+            return None
+
+        # Security: DoS prevention by restricting maximum imported JSON payload size
+        if len(json_content) > self.MAX_IMPORT_SIZE:
+            print(f"[LocalChatHistoryManager] Error: El JSON excede el límite de {self.MAX_IMPORT_SIZE} caracteres.")
+            return None
+
         try:
             data = json.loads(json_content)
             if not isinstance(data, dict):
                 return None
 
-            # Si no tiene session_id o ya existe, asignar uno nuevo para evitar sobreescritura accidental
-            session_id = data.get("session_id")
-            if not session_id or self.get_session(session_id) is not None:
+            # Security: Sanitize session_id to prevent path traversal vulnerabilities
+            raw_id = data.get("session_id")
+            if not isinstance(raw_id, str) or not raw_id:
                 data["session_id"] = uuid.uuid4().hex
+            else:
+                safe_id = self._sanitize_session_id(raw_id)
+                # Assign new ID if session already exists to avoid unintended overwrite
+                if self.get_session(safe_id) is not None:
+                    data["session_id"] = uuid.uuid4().hex
+                else:
+                    data["session_id"] = safe_id
 
             session = ChatSession.from_dict(data)
             session.updated_at = self._current_timestamp()

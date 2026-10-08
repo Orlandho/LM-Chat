@@ -310,3 +310,30 @@ class TestLocalChatHistoryManager:
         res_model = mgr.search_sessions("nemotron")
         assert len(res_model) == 1
         assert res_model[0]["session_id"] == s1.session_id
+
+    def test_import_session_json_security_validation_and_sanitization(self, tmp_path):
+        mgr = LocalChatHistoryManager(storage_dir=str(tmp_path))
+
+        # 1. Non-string or empty input returns None cleanly
+        assert mgr.import_session_json(None) is None
+        assert mgr.import_session_json("") is None
+        assert mgr.import_session_json("   ") is None
+        assert mgr.import_session_json(12345) is None
+
+        # 2. Oversized payload returns None (DoS prevention)
+        oversized_json = "{" + '"data": "' + ("a" * (mgr.MAX_IMPORT_SIZE + 10)) + '"}'
+        assert mgr.import_session_json(oversized_json) is None
+
+        # 3. Malicious session_id in imported JSON is sanitized to prevent path traversal
+        malicious_payload = json.dumps({
+            "session_id": "../../../etc/passwd",
+            "title": "Malicious Import",
+            "messages": [{"role": "user", "content": "test"}]
+        })
+        imported = mgr.import_session_json(malicious_payload)
+        assert imported is not None
+        assert ".." not in imported.session_id
+        assert "/" not in imported.session_id
+        assert "\\" not in imported.session_id
+        assert imported.session_id != "../../../etc/passwd"
+        assert os.path.exists(tmp_path / f"{imported.session_id}.json")
