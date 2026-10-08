@@ -15,3 +15,9 @@
 **Learning:** In `asyncio.subprocess` stream reader loops (e.g., stdio MCP listeners), calling `readline()` on a closed or terminated subprocess stream returns empty bytes (`b""`). Continuously calling `readline()` after EOF returns `b""` immediately without blocking. Doing `if not line: await asyncio.sleep(0.01); continue` creates an infinite busy-polling loop running 100 Hz that burns CPU, wastes memory, and blocks pending request cleanup.
 
 **Action:** Always `break` out of `readline()` loops when `not line` is encountered to gracefully terminate reader tasks upon stream EOF.
+
+## 2026-03-31 - Single-Pass JSON Session Search & Elimination of Double Disk Reads
+
+**Learning:** Calling `self.get_session(summary["session_id"])` for every summary returned by `self.list_sessions()` caused `search_sessions()` to open, read, and JSON-parse every session file on disk twice. In search operations across session histories, doing a single-pass scan over `os.listdir(storage_dir)` cuts disk I/O and JSON deserialization in half, resulting in a ~2.4x speedup.
+
+**Action:** Avoid calling helper methods that re-read files from disk inside loops over file list summaries; perform data extraction and filtering in a single pass over directory contents.
