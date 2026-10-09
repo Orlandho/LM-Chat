@@ -49,3 +49,16 @@ class TestUSDController:
         res = controller.execute_code(bad_code)
         assert res["success"] is False
         assert "Custom USD execution error" in res["error_msg"]
+
+    def test_execute_code_restricted_builtins(self):
+        """Test that restricted dangerous builtins like __import__ or open are blocked."""
+        controller = USDController()
+        import_code = "__import__('os').system('echo pwned')"
+        res = controller.execute_code(import_code)
+        assert res["success"] is False
+        assert "name '__import__' is not defined" in res["error_msg"]
+
+        open_code = "open('/etc/passwd', 'r')"
+        res = controller.execute_code(open_code)
+        assert res["success"] is False
+        assert "name 'open' is not defined" in res["error_msg"]

@@ -38,8 +38,46 @@ class USDController:
                 "error_msg": f"Security limit exceeded: Code payload length exceeds maximum allowed limit of {self.MAX_CODE_SIZE} characters."
             }
 
-        # Prepare execution environment
+        # Prepare execution environment with restricted builtins for sandbox defense-in-depth
+        safe_builtins = {
+            "abs": abs,
+            "all": all,
+            "any": any,
+            "bool": bool,
+            "dict": dict,
+            "enumerate": enumerate,
+            "float": float,
+            "getattr": getattr,
+            "hasattr": hasattr,
+            "int": int,
+            "isinstance": isinstance,
+            "issubclass": issubclass,
+            "len": len,
+            "list": list,
+            "max": max,
+            "min": min,
+            "print": print,
+            "range": range,
+            "repr": repr,
+            "set": set,
+            "str": str,
+            "sum": sum,
+            "tuple": tuple,
+            "zip": zip,
+            "Exception": Exception,
+            "ValueError": ValueError,
+            "TypeError": TypeError,
+            "RuntimeError": RuntimeError,
+            "AttributeError": AttributeError,
+            "KeyError": KeyError,
+            "IndexError": IndexError,
+            "True": True,
+            "False": False,
+            "None": None,
+        }
+
         exec_globals = {
+            "__builtins__": safe_builtins,
             "omni": __import__('omni') if omni is not None else None,
             "pxr": pxr,
             "Usd": Usd,
