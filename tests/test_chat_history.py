@@ -220,6 +220,36 @@ class TestLocalChatHistoryManager:
         assert ".." not in safe_path
         assert "passwd" in safe_path or len(os.path.basename(safe_path)) > 5
 
+    def test_sanitize_session_id_handles_non_string_types(self, tmp_path):
+        mgr = LocalChatHistoryManager(storage_dir=str(tmp_path))
+
+        assert mgr._sanitize_session_id(12345) == "12345"
+        assert mgr._sanitize_session_id(None) != ""
+        assert len(mgr._sanitize_session_id(None)) >= 8
+        assert mgr._sanitize_session_id(["invalid"]) != ""
+
+    def test_import_session_json_validates_payload_size_and_type(self, tmp_path):
+        mgr = LocalChatHistoryManager(storage_dir=str(tmp_path))
+
+        # Payload no-string
+        assert mgr.import_session_json(12345) is None
+
+        # Payload excesivo
+        oversized_json = "x" * (mgr.MAX_IMPORT_SIZE + 1)
+        assert mgr.import_session_json(oversized_json) is None
+
+        # Session ID malicioso en importación sanitizado correctamente
+        malicious_import = json.dumps({
+            "session_id": "../../../etc/evil_session",
+            "title": "Malicious Import",
+            "messages": [],
+        })
+        imported = mgr.import_session_json(malicious_import)
+        assert imported is not None
+        assert ".." not in imported.session_id
+        assert "/" not in imported.session_id
+        assert "\\" not in imported.session_id
+
     def test_generate_title_from_prompt(self):
         # Prompt normal corto
         assert LocalChatHistoryManager.generate_title_from_prompt("Crear un cubo") == "Crear un cubo"

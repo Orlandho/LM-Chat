@@ -21,6 +21,8 @@ class LocalChatHistoryManager(IChatHistoryManager):
     """Implementación local y desacoplada del historial de conversaciones."""
 
     DEFAULT_TITLE = "Nueva Conversación"
+    # Límite de tamaño para importación JSON (10MB) para prevenir DoS
+    MAX_IMPORT_SIZE: int = 10_000_000
 
     def __init__(self, storage_dir: Optional[str] = None) -> None:
         """Inicializa el gestor de historial local.
@@ -54,15 +56,17 @@ class LocalChatHistoryManager(IChatHistoryManager):
         except Exception as e:
             print(f"[LocalChatHistoryManager] Error creando directorio {self._storage_dir}: {e}")
 
-    def _sanitize_session_id(self, session_id: str) -> str:
+    def _sanitize_session_id(self, session_id: Any) -> str:
         """Limpia el identificador de sesión para evitar vulnerabilidades de directory traversal.
 
         Args:
-            session_id (str): ID a sanitizar.
+            session_id (Any): ID a sanitizar.
 
         Returns:
             str: ID seguro alfanumérico con guiones y guiones bajos.
         """
+        if not isinstance(session_id, str):
+            session_id = str(session_id) if session_id is not None else ""
         safe_id = re.sub(r"[^a-zA-Z0-9_\-]", "", session_id)
         if not safe_id:
             safe_id = uuid.uuid4().hex
@@ -352,16 +356,26 @@ class LocalChatHistoryManager(IChatHistoryManager):
             json_content (str): Contenido en formato JSON.
 
         Returns:
-            Optional[ChatSession]: Sesión importada o None si el JSON es inválido.
+            Optional[ChatSession]: Sesión importada o None si el JSON es inválido o excede el límite.
         """
+        if not isinstance(json_content, str) or len(json_content) > self.MAX_IMPORT_SIZE:
+            print("[LocalChatHistoryManager] Payload inválido o excede límite de tamaño para importación.")
+            return None
+
         try:
             data = json.loads(json_content)
             if not isinstance(data, dict):
                 return None
 
-            # Si no tiene session_id o ya existe, asignar uno nuevo para evitar sobreescritura accidental
-            session_id = data.get("session_id")
-            if not session_id or self.get_session(session_id) is not None:
+            # Sanitización de session_id e ingestión segura para evitar colisiones/traversal
+            raw_id = data.get("session_id")
+            if raw_id:
+                sanitized_id = self._sanitize_session_id(raw_id)
+                if self.get_session(sanitized_id) is not None:
+                    data["session_id"] = uuid.uuid4().hex
+                else:
+                    data["session_id"] = sanitized_id
+            else:
                 data["session_id"] = uuid.uuid4().hex
 
             session = ChatSession.from_dict(data)
