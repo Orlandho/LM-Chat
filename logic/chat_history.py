@@ -133,20 +133,20 @@ class LocalChatHistoryManager(IChatHistoryManager):
             print(f"[LocalChatHistoryManager] Error leyendo sesión {session_id}: {e}")
             return None
 
-    def list_sessions(self) -> List[Dict[str, Any]]:
-        """Lista los metadatos resumidos de todas las sesiones ordenadas cronológicamente.
+    def _read_raw_sessions(self) -> List[tuple[str, Dict[str, Any]]]:
+        """Lee todos los archivos de sesión válidos en el directorio de almacenamiento en una sola pasada.
 
         Returns:
-            List[Dict[str, Any]]: Lista de resúmenes de sesión ordenados por updated_at descendente.
+            List[tuple[str, Dict[str, Any]]]: Lista de tuplas (nombre_archivo, datos_dict).
         """
         self._ensure_storage_dir()
-        summaries: List[Dict[str, Any]] = []
+        sessions_data: List[tuple[str, Dict[str, Any]]] = []
 
         try:
             filenames = os.listdir(self._storage_dir)
         except OSError as e:
             print(f"[LocalChatHistoryManager] Error listando directorio {self._storage_dir}: {e}")
-            return summaries
+            return sessions_data
 
         for fname in filenames:
             if not fname.endswith(".json") or fname.startswith("."):
@@ -157,46 +157,58 @@ class LocalChatHistoryManager(IChatHistoryManager):
                 with open(file_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
 
-                if not isinstance(data, dict):
-                    continue
-
-                session_id = data.get("session_id", fname[:-5])
-                title = data.get("title") or self.DEFAULT_TITLE
-                created_at = data.get("created_at", "")
-                updated_at = data.get("updated_at") or created_at
-                messages = data.get("messages")
-                if not isinstance(messages, list):
-                    messages = []
-                metadata = data.get("metadata")
-                if not isinstance(metadata, dict):
-                    metadata = {}
-
-                last_msg_snippet = ""
-                if messages:
-                    last_msg = messages[-1]
-                    if isinstance(last_msg, dict):
-                        content = last_msg.get("content", "")
-                    elif hasattr(last_msg, "content"):
-                        content = last_msg.content
-                    elif isinstance(last_msg, str):
-                        content = last_msg
-                    else:
-                        content = str(last_msg)
-                    last_msg_snippet = content[:60] + ("..." if len(content) > 60 else "")
-
-                summaries.append({
-                    "session_id": session_id,
-                    "title": title,
-                    "created_at": created_at,
-                    "updated_at": updated_at,
-                    "message_count": len(messages),
-                    "last_message": last_msg_snippet,
-                    "metadata": metadata,
-                })
+                if isinstance(data, dict):
+                    sessions_data.append((fname, data))
             except (json.JSONDecodeError, OSError, UnicodeDecodeError, AttributeError, Exception) as e:
                 # Omitir archivos temporales rotos o corruptos
                 print(f"[LocalChatHistoryManager] Archivo corrupto ignorado {fname}: {e}")
                 continue
+
+        return sessions_data
+
+    def list_sessions(self) -> List[Dict[str, Any]]:
+        """Lista los metadatos resumidos de todas las sesiones ordenadas cronológicamente.
+
+        Returns:
+            List[Dict[str, Any]]: Lista de resúmenes de sesión ordenados por updated_at descendente.
+        """
+        # Optimization: Single disk-read pass via _read_raw_sessions helper
+        summaries: List[Dict[str, Any]] = []
+
+        for fname, data in self._read_raw_sessions():
+            session_id = data.get("session_id", fname[:-5])
+            title = data.get("title") or self.DEFAULT_TITLE
+            created_at = data.get("created_at", "")
+            updated_at = data.get("updated_at") or created_at
+            messages = data.get("messages")
+            if not isinstance(messages, list):
+                messages = []
+            metadata = data.get("metadata")
+            if not isinstance(metadata, dict):
+                metadata = {}
+
+            last_msg_snippet = ""
+            if messages:
+                last_msg = messages[-1]
+                if isinstance(last_msg, dict):
+                    content = last_msg.get("content", "")
+                elif hasattr(last_msg, "content"):
+                    content = last_msg.content
+                elif isinstance(last_msg, str):
+                    content = last_msg
+                else:
+                    content = str(last_msg)
+                last_msg_snippet = content[:60] + ("..." if len(content) > 60 else "")
+
+            summaries.append({
+                "session_id": session_id,
+                "title": title,
+                "created_at": created_at,
+                "updated_at": updated_at,
+                "message_count": len(messages),
+                "last_message": last_msg_snippet,
+                "metadata": metadata,
+            })
 
         # Ordenar por updated_at más reciente primero
         summaries.sort(key=lambda s: s.get("updated_at", ""), reverse=True)
@@ -218,10 +230,10 @@ class LocalChatHistoryManager(IChatHistoryManager):
         )
 
         try:
-            # Serialización en archivo temporal
+            # Optimization: Compact JSON serialization without indent=2 reduces payload size and disk writes
             data = session.to_dict()
             with open(tmp_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+                json.dump(data, f, ensure_ascii=False)
                 f.flush()
                 os.fsync(f.fileno())
 
@@ -292,19 +304,30 @@ class LocalChatHistoryManager(IChatHistoryManager):
         normalized_query = query.strip().lower()
         results: List[Dict[str, Any]] = []
 
-        for summary in self.list_sessions():
+        # Optimization: Single disk-read pass over raw session files, avoiding redundant file opens
+        # and duplicate ChatSession object instantiations from self.get_session() (~2x faster search)
+        for fname, data in self._read_raw_sessions():
+            session_id = data.get("session_id", fname[:-5])
+            title = data.get("title") or self.DEFAULT_TITLE
+            created_at = data.get("created_at", "")
+            updated_at = data.get("updated_at") or created_at
+            messages = data.get("messages")
+            if not isinstance(messages, list):
+                messages = []
+            metadata = data.get("metadata")
+            if not isinstance(metadata, dict):
+                metadata = {}
+
             matched = False
             match_snippets: List[str] = []
 
             # Coincidencia en título
-            title = summary.get("title", "")
             if normalized_query in title.lower():
                 matched = True
                 match_snippets.append(f"Título: {title}")
 
             # Coincidencia en metadatos (proveedor, modelo, tags)
-            meta = summary.get("metadata") or {}
-            for k, v in meta.items():
+            for k, v in metadata.items():
                 if isinstance(v, str) and normalized_query in v.lower():
                     matched = True
                     match_snippets.append(f"Metadatos ({k}): {v}")
@@ -315,20 +338,50 @@ class LocalChatHistoryManager(IChatHistoryManager):
                             match_snippets.append(f"Etiqueta: {item_val}")
 
             # Coincidencia en contenido de mensajes
-            session = self.get_session(summary["session_id"])
-            if session:
-                for msg in session.messages:
-                    msg_content = msg.content if isinstance(msg.content, str) else str(msg.content or "")
-                    if normalized_query in msg_content.lower():
-                        matched = True
-                        snippet = msg_content[:80] + ("..." if len(msg_content) > 80 else "")
-                        match_snippets.append(f"[{msg.role}]: {snippet}")
+            for msg in messages:
+                if isinstance(msg, dict):
+                    role = msg.get("role", "user")
+                    content = msg.get("content", "")
+                elif hasattr(msg, "content"):
+                    role = getattr(msg, "role", "user")
+                    content = msg.content
+                else:
+                    role = "user"
+                    content = str(msg)
+
+                msg_content = content if isinstance(content, str) else str(content or "")
+                if normalized_query in msg_content.lower():
+                    matched = True
+                    snippet = msg_content[:80] + ("..." if len(msg_content) > 80 else "")
+                    match_snippets.append(f"[{role}]: {snippet}")
 
             if matched:
-                item = dict(summary)
-                item["matches"] = match_snippets
-                results.append(item)
+                last_msg_snippet = ""
+                if messages:
+                    last_msg = messages[-1]
+                    if isinstance(last_msg, dict):
+                        last_content = last_msg.get("content", "")
+                    elif hasattr(last_msg, "content"):
+                        last_content = last_msg.content
+                    elif isinstance(last_msg, str):
+                        last_content = last_msg
+                    else:
+                        last_content = str(last_msg)
+                    last_msg_snippet = last_content[:60] + ("..." if len(last_content) > 60 else "")
 
+                results.append({
+                    "session_id": session_id,
+                    "title": title,
+                    "created_at": created_at,
+                    "updated_at": updated_at,
+                    "message_count": len(messages),
+                    "last_message": last_msg_snippet,
+                    "metadata": metadata,
+                    "matches": match_snippets,
+                })
+
+        # Ordenar por updated_at más reciente primero
+        results.sort(key=lambda s: s.get("updated_at", ""), reverse=True)
         return results
 
     def export_session_json(self, session_id: str) -> Optional[str]:
