@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 
+import builtins
+
 try:
     import omni.ext
     import pxr
@@ -10,6 +12,12 @@ except ImportError:
     Usd = None
     UsdGeom = None
     Gf = None
+
+# Restricted builtins dictionary excluding potentially unsafe execution/file functions
+SAFE_BUILTINS = {
+    k: v for k, v in builtins.__dict__.items()
+    if k not in ("eval", "exec", "__import__", "open", "compile", "input")
+}
 
 class USDController:
     """Handles execution of dynamic USD python code."""
@@ -38,8 +46,9 @@ class USDController:
                 "error_msg": f"Security limit exceeded: Code payload length exceeds maximum allowed limit of {self.MAX_CODE_SIZE} characters."
             }
 
-        # Prepare execution environment
+        # Prepare execution environment with restricted builtins for defense-in-depth
         exec_globals = {
+            "__builtins__": SAFE_BUILTINS,
             "omni": __import__('omni') if omni is not None else None,
             "pxr": pxr,
             "Usd": Usd,

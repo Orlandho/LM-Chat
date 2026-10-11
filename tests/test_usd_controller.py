@@ -49,3 +49,11 @@ class TestUSDController:
         res = controller.execute_code(bad_code)
         assert res["success"] is False
         assert "Custom USD execution error" in res["error_msg"]
+
+    def test_execute_code_builtins_restricted(self):
+        """Test that dangerous builtin functions are restricted during execution."""
+        controller = USDController()
+        restricted_code = "eval('1 + 1')"
+        res = controller.execute_code(restricted_code)
+        assert res["success"] is False
+        assert "eval" in res["error_msg"] or "NameError" in res["error_msg"]
