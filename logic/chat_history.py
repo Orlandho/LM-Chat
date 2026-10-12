@@ -218,10 +218,10 @@ class LocalChatHistoryManager(IChatHistoryManager):
         )
 
         try:
-            # Serialización en archivo temporal
+            # Serialización compacta en archivo temporal (reduce ~30% el tamaño en disco y acelera I/O/parseo en list_sessions)
             data = session.to_dict()
             with open(tmp_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+                json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
                 f.flush()
                 os.fsync(f.fileno())
 
@@ -338,12 +338,13 @@ class LocalChatHistoryManager(IChatHistoryManager):
             session_id (str): Identificador de la sesión.
 
         Returns:
-            Optional[str]: Representación JSON formateada o None si no existe.
+            Optional[str]: Representación JSON compacta o None si no existe.
         """
         session = self.get_session(session_id)
         if not session:
             return None
-        return json.dumps(session.to_dict(), ensure_ascii=False, indent=2)
+        # Usar formato compacto sin indentación para optimizar tamaño del payload y rendimiento de E/S
+        return json.dumps(session.to_dict(), ensure_ascii=False, separators=(",", ":"))
 
     def import_session_json(self, json_content: str) -> Optional[ChatSession]:
         """Importa una sesión desde una cadena JSON y la persiste localmente.

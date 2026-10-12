@@ -269,7 +269,8 @@ class LMChatCLI:
             idx = int(clean_id) - 1
             if 0 <= idx < len(sessions):
                 target_id = sessions[idx]["session_id"]
-        else:
+
+        if not target_id:
             for s in sessions:
                 if s["session_id"].startswith(clean_id):
                     target_id = s["session_id"]
@@ -321,7 +322,8 @@ class LMChatCLI:
             idx = int(clean_id) - 1
             if 0 <= idx < len(sessions):
                 target_id = sessions[idx]["session_id"]
-        else:
+
+        if not target_id:
             for s in sessions:
                 if s["session_id"].startswith(clean_id):
                     target_id = s["session_id"]
