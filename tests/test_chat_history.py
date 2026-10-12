@@ -220,6 +220,30 @@ class TestLocalChatHistoryManager:
         assert ".." not in safe_path
         assert "passwd" in safe_path or len(os.path.basename(safe_path)) > 5
 
+    def test_import_session_json_sanitizes_path_traversal(self, tmp_path):
+        mgr = LocalChatHistoryManager(storage_dir=str(tmp_path))
+        malicious_json = json.dumps({
+            "session_id": "../../../etc/malicious_session",
+            "title": "Malicious Import Test",
+            "messages": [{"role": "user", "content": "Hello"}]
+        })
+
+        imported = mgr.import_session_json(malicious_json)
+        assert imported is not None
+        assert ".." not in imported.session_id
+        assert "/" not in imported.session_id
+        session_file = tmp_path / f"{imported.session_id}.json"
+        assert session_file.exists()
+
+    def test_sanitize_session_id_handles_non_string(self, tmp_path):
+        mgr = LocalChatHistoryManager(storage_dir=str(tmp_path))
+        safe_num = mgr._sanitize_session_id(12345)
+        assert safe_num == "12345"
+
+        safe_none = mgr._sanitize_session_id(None)
+        assert len(safe_none) > 0
+        assert isinstance(safe_none, str)
+
     def test_generate_title_from_prompt(self):
         # Prompt normal corto
         assert LocalChatHistoryManager.generate_title_from_prompt("Crear un cubo") == "Crear un cubo"

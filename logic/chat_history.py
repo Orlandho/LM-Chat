@@ -63,6 +63,8 @@ class LocalChatHistoryManager(IChatHistoryManager):
         Returns:
             str: ID seguro alfanumérico con guiones y guiones bajos.
         """
+        if not isinstance(session_id, str):
+            session_id = str(session_id) if session_id is not None else ""
         safe_id = re.sub(r"[^a-zA-Z0-9_\-]", "", session_id)
         if not safe_id:
             safe_id = uuid.uuid4().hex
@@ -359,10 +361,16 @@ class LocalChatHistoryManager(IChatHistoryManager):
             if not isinstance(data, dict):
                 return None
 
-            # Si no tiene session_id o ya existe, asignar uno nuevo para evitar sobreescritura accidental
-            session_id = data.get("session_id")
-            if not session_id or self.get_session(session_id) is not None:
+            # Sanitizar session_id para evitar directory traversal y conflictos
+            raw_session_id = data.get("session_id")
+            if not raw_session_id:
                 data["session_id"] = uuid.uuid4().hex
+            else:
+                sanitized = self._sanitize_session_id(raw_session_id)
+                if self.get_session(sanitized) is not None:
+                    data["session_id"] = uuid.uuid4().hex
+                else:
+                    data["session_id"] = sanitized
 
             session = ChatSession.from_dict(data)
             session.updated_at = self._current_timestamp()
