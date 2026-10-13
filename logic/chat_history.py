@@ -48,9 +48,14 @@ class LocalChatHistoryManager(IChatHistoryManager):
         return self._storage_dir
 
     def _ensure_storage_dir(self) -> None:
-        """Crea el directorio de almacenamiento si no existe."""
+        """Crea el directorio de almacenamiento con permisos restringidos (0o700) si no existe."""
         try:
-            os.makedirs(self._storage_dir, exist_ok=True)
+            os.makedirs(self._storage_dir, mode=0o700, exist_ok=True)
+            if os.name == "posix":
+                try:
+                    os.chmod(self._storage_dir, 0o700)
+                except OSError:
+                    pass
         except Exception as e:
             print(f"[LocalChatHistoryManager] Error creando directorio {self._storage_dir}: {e}")
 
@@ -218,15 +223,23 @@ class LocalChatHistoryManager(IChatHistoryManager):
         )
 
         try:
-            # Serialización en archivo temporal
+            # Serialización en archivo temporal con permisos restringidos (0o600)
             data = session.to_dict()
-            with open(tmp_path, "w", encoding="utf-8") as f:
+            flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+            mode = 0o600
+            fd = os.open(tmp_path, flags, mode)
+            with open(fd, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
                 f.flush()
                 os.fsync(f.fileno())
 
             # Reemplazo atómico para evitar corrupción por caídas abruptas
             os.replace(tmp_path, file_path)
+            if os.name == "posix":
+                try:
+                    os.chmod(file_path, 0o600)
+                except OSError:
+                    pass
             return True
         except (OSError, TypeError, ValueError, AttributeError, Exception) as e:
             print(f"[LocalChatHistoryManager] Error guardando sesión {session.session_id}: {e}")
@@ -365,6 +378,7 @@ class LocalChatHistoryManager(IChatHistoryManager):
                 data["session_id"] = uuid.uuid4().hex
 
             session = ChatSession.from_dict(data)
+            session.session_id = self._sanitize_session_id(session.session_id)
             session.updated_at = self._current_timestamp()
             self.save_session(session)
             return session

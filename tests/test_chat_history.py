@@ -310,3 +310,30 @@ class TestLocalChatHistoryManager:
         res_model = mgr.search_sessions("nemotron")
         assert len(res_model) == 1
         assert res_model[0]["session_id"] == s1.session_id
+
+    def test_storage_permissions_enforced(self, tmp_path):
+        target_dir = tmp_path / "secure_sessions"
+        mgr = LocalChatHistoryManager(storage_dir=str(target_dir))
+        session = mgr.create_session(title="Secure Session")
+
+        if os.name == "posix":
+            # Permisos de directorio deben ser 0o700 (owner only rwx)
+            dir_stat = os.stat(str(target_dir))
+            assert (dir_stat.st_mode & 0o777) == 0o700
+
+            # Permisos de archivo deben ser 0o600 (owner only rw)
+            session_file = target_dir / f"{session.session_id}.json"
+            file_stat = os.stat(str(session_file))
+            assert (file_stat.st_mode & 0o777) == 0o600
+
+    def test_import_session_json_sanitizes_session_id(self, tmp_path):
+        mgr = LocalChatHistoryManager(storage_dir=str(tmp_path))
+        malicious_json = json.dumps({
+            "session_id": "../../../etc_passwd",
+            "title": "Malicious Import",
+            "messages": [{"role": "user", "content": "Hello"}]
+        })
+        imported = mgr.import_session_json(malicious_json)
+        assert imported is not None
+        assert ".." not in imported.session_id
+        assert "/" not in imported.session_id
