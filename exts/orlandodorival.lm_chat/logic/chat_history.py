@@ -49,9 +49,9 @@ class LocalChatHistoryManager(IChatHistoryManager):
         return self._storage_dir
 
     def _ensure_storage_dir(self) -> None:
-        """Crea el directorio de almacenamiento si no existe."""
+        """Crea el directorio de almacenamiento si no existe con permisos seguros."""
         try:
-            os.makedirs(self._storage_dir, exist_ok=True)
+            os.makedirs(self._storage_dir, mode=0o700, exist_ok=True)
         except Exception as e:
             print(f"[LocalChatHistoryManager] Error creando directorio {self._storage_dir}: {e}")
 
@@ -238,12 +238,23 @@ class LocalChatHistoryManager(IChatHistoryManager):
         )
 
         try:
-            # Serialización en archivo temporal
+            # Serialización en archivo temporal (compacta y con permisos restringidos 0o600)
             data = session.to_dict()
-            with open(tmp_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-                f.flush()
-                os.fsync(f.fileno())
+            flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+            if hasattr(os, "O_BINARY"):
+                flags |= os.O_BINARY
+
+            try:
+                fd = os.open(tmp_path, flags, 0o600)
+                with open(fd, "w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False)
+                    f.flush()
+                    os.fsync(f.fileno())
+            except Exception:
+                with open(tmp_path, "w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False)
+                    f.flush()
+                    os.fsync(f.fileno())
 
             # Reemplazo atómico para evitar corrupción por caídas abruptas
             os.replace(tmp_path, file_path)
@@ -300,6 +311,9 @@ class LocalChatHistoryManager(IChatHistoryManager):
     def search_sessions(self, query: str) -> List[Dict[str, Any]]:
         """Busca sesiones que coincidan en título, contenido de mensajes o metadatos.
 
+        Optimización: Realiza una única lectura y deserialización JSON por archivo en disco,
+        evitando lecturas dobles y la instanciación innecesaria de objetos ChatSession.
+
         Args:
             query (str): Término de búsqueda.
 
@@ -312,43 +326,105 @@ class LocalChatHistoryManager(IChatHistoryManager):
         normalized_query = query.strip().lower()
         results: List[Dict[str, Any]] = []
 
-        for summary in self.list_sessions():
-            matched = False
-            match_snippets: List[str] = []
+        self._ensure_storage_dir()
+        try:
+            filenames = os.listdir(self._storage_dir)
+        except OSError as e:
+            print(f"[LocalChatHistoryManager] Error listando directorio {self._storage_dir}: {e}")
+            return results
 
-            # Coincidencia en título
-            title = summary.get("title", "")
-            if normalized_query in title.lower():
-                matched = True
-                match_snippets.append(f"Título: {title}")
+        for fname in filenames:
+            if not fname.endswith(".json") or fname.startswith("."):
+                continue
 
-            # Coincidencia en metadatos (proveedor, modelo, tags)
-            meta = summary.get("metadata") or {}
-            for k, v in meta.items():
-                if isinstance(v, str) and normalized_query in v.lower():
+            file_path = os.path.join(self._storage_dir, fname)
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+
+                if not isinstance(data, dict):
+                    continue
+
+                session_id = data.get("session_id", fname[:-5])
+                title = data.get("title") or self.DEFAULT_TITLE
+                created_at = data.get("created_at", "")
+                updated_at = data.get("updated_at") or created_at
+                messages = data.get("messages")
+                if not isinstance(messages, list):
+                    messages = []
+                metadata = data.get("metadata")
+                if not isinstance(metadata, dict):
+                    metadata = {}
+
+                matched = False
+                match_snippets: List[str] = []
+
+                # Coincidencia en título
+                if normalized_query in title.lower():
                     matched = True
-                    match_snippets.append(f"Metadatos ({k}): {v}")
-                elif isinstance(v, list):
-                    for item_val in v:
-                        if isinstance(item_val, str) and normalized_query in item_val.lower():
-                            matched = True
-                            match_snippets.append(f"Etiqueta: {item_val}")
+                    match_snippets.append(f"Título: {title}")
 
-            # Coincidencia en contenido de mensajes
-            session = self.get_session(summary["session_id"])
-            if session:
-                for msg in session.messages:
-                    msg_content = msg.content if isinstance(msg.content, str) else str(msg.content or "")
+                # Coincidencia en metadatos (proveedor, modelo, tags)
+                for k, v in metadata.items():
+                    if isinstance(v, str) and normalized_query in v.lower():
+                        matched = True
+                        match_snippets.append(f"Metadatos ({k}): {v}")
+                    elif isinstance(v, list):
+                        for item_val in v:
+                            if isinstance(item_val, str) and normalized_query in item_val.lower():
+                                matched = True
+                                match_snippets.append(f"Etiqueta: {item_val}")
+
+                # Coincidencia en contenido de mensajes
+                for msg in messages:
+                    if isinstance(msg, dict):
+                        role = msg.get("role", "user")
+                        content = msg.get("content", "")
+                    elif hasattr(msg, "content"):
+                        role = getattr(msg, "role", "user")
+                        content = msg.content
+                    elif isinstance(msg, str):
+                        role = "user"
+                        content = msg
+                    else:
+                        role = "user"
+                        content = str(msg)
+
+                    msg_content = content if isinstance(content, str) else str(content or "")
                     if normalized_query in msg_content.lower():
                         matched = True
                         snippet = msg_content[:80] + ("..." if len(msg_content) > 80 else "")
-                        match_snippets.append(f"[{msg.role}]: {snippet}")
+                        match_snippets.append(f"[{role}]: {snippet}")
 
-            if matched:
-                item = dict(summary)
-                item["matches"] = match_snippets
-                results.append(item)
+                if matched:
+                    last_msg_snippet = ""
+                    if messages:
+                        last_msg = messages[-1]
+                        if isinstance(last_msg, dict):
+                            c_last = last_msg.get("content", "")
+                        elif hasattr(last_msg, "content"):
+                            c_last = last_msg.content
+                        elif isinstance(last_msg, str):
+                            c_last = last_msg
+                        else:
+                            c_last = str(last_msg)
+                        last_msg_snippet = c_last[:60] + ("..." if len(c_last) > 60 else "")
 
+                    results.append({
+                        "session_id": session_id,
+                        "title": title,
+                        "created_at": created_at,
+                        "updated_at": updated_at,
+                        "message_count": len(messages),
+                        "last_message": last_msg_snippet,
+                        "metadata": metadata,
+                        "matches": match_snippets,
+                    })
+            except (json.JSONDecodeError, OSError, UnicodeDecodeError, AttributeError, Exception) as e:
+                print(f"[LocalChatHistoryManager] Archivo corrupto ignorado {fname}: {e}")
+                continue
+
+        results.sort(key=lambda s: s.get("updated_at", ""), reverse=True)
         return results
 
     def export_session_json(self, session_id: str) -> Optional[str]:
@@ -363,7 +439,7 @@ class LocalChatHistoryManager(IChatHistoryManager):
         session = self.get_session(session_id)
         if not session:
             return None
-        return json.dumps(session.to_dict(), ensure_ascii=False, indent=2)
+        return json.dumps(session.to_dict(), ensure_ascii=False)
 
     def import_session_json(self, json_content: str) -> Optional[ChatSession]:
         """Importa una sesión desde una cadena JSON y la persiste localmente.
@@ -381,7 +457,13 @@ class LocalChatHistoryManager(IChatHistoryManager):
 
             # Si no tiene session_id o ya existe, asignar uno nuevo para evitar sobreescritura accidental
             session_id = data.get("session_id")
-            if not session_id or self.get_session(session_id) is not None:
+            if session_id:
+                sanitized = self._sanitize_session_id(str(session_id))
+                if not sanitized or self.get_session(sanitized) is not None:
+                    data["session_id"] = uuid.uuid4().hex
+                else:
+                    data["session_id"] = sanitized
+            else:
                 data["session_id"] = uuid.uuid4().hex
 
             session = ChatSession.from_dict(data)

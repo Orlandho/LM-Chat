@@ -69,8 +69,9 @@ class USDController:
         if not is_valid:
             return {"success": False, "error_msg": violation_err}
 
-        # Prepare execution environment with safe bindings and inspector
+        # Prepare execution environment with safe bindings, explicit builtins and inspector
         exec_globals = {
+            "__builtins__": __builtins__,
             "omni": __import__('omni') if omni is not None else None,
             "pxr": pxr,
             "Usd": Usd,
