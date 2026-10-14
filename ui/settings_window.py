@@ -46,6 +46,7 @@ class SettingsWindow:
 
         self._selected_model = self._settings_manager.get_default_model(self._selected_provider)
         self._is_default_provider = True
+        self._discover_task: Optional[Any] = None
 
         self._window = ui.Window(
             "LM-Chat - Configuración de Servicios y Modelos",
@@ -83,6 +84,8 @@ class SettingsWindow:
 
     def destroy(self) -> None:
         """Destruye los recursos de la ventana."""
+        if hasattr(self, "_discover_task") and self._discover_task and not self._discover_task.done():
+            self._discover_task.cancel()
         if self._window:
             self._window.destroy()
             self._window = None
@@ -504,11 +507,11 @@ class SettingsWindow:
             if loop.is_closed():
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
-            loop.create_task(self._discover_models_async())
+            self._discover_task = loop.create_task(self._discover_models_async())
         except RuntimeError:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            loop.create_task(self._discover_models_async())
+            self._discover_task = loop.create_task(self._discover_models_async())
 
 
     async def _discover_models_async(self) -> None:
