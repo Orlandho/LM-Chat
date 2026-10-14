@@ -374,8 +374,13 @@ class SettingsManager(ISettingsManager):
                 os.makedirs(config_dir, exist_ok=True)
 
             temp_path = f"{self._config_path}.tmp"
+            data_to_save = dict(self._settings_data)
+            if "mcp_servers" in data_to_save:
+                data_to_save["mcp_servers"] = [
+                    s.to_dict() if hasattr(s, "to_dict") else s for s in data_to_save["mcp_servers"]
+                ]
             with open(temp_path, "w", encoding="utf-8") as f:
-                json.dump(self._settings_data, f, indent=2, ensure_ascii=False)
+                json.dump(data_to_save, f, indent=2, ensure_ascii=False)
 
             if os.path.exists(self._config_path):
                 os.replace(temp_path, self._config_path)
@@ -392,6 +397,9 @@ class SettingsManager(ISettingsManager):
         self._settings_data = {
             "default_provider": "LM Studio",
             "default_model": "local-model",
+            "execution_mode": "immediate",
+            "turbo_mode": False,
+            "mcp_servers": [],
             "providers": json.loads(json.dumps(self.DEFAULT_PROVIDERS_CONFIG)),
         }
         logger.info("Configuración restablecida a valores por defecto")
@@ -662,4 +670,125 @@ class SettingsManager(ISettingsManager):
 
 
         return cfg.get("available_models", [])
+
+    def get_execution_mode(self) -> str:
+        """Obtiene el modo de ejecución activo ('immediate' o 'plan_and_confirm')."""
+        return self._settings_data.get("execution_mode", "immediate")
+
+    def set_execution_mode(self, mode: str) -> None:
+        """Establece el modo de ejecución activo y lo persiste en disco."""
+        clean_mode = "plan_and_confirm" if "plan" in mode.lower() else "immediate"
+        self._settings_data["execution_mode"] = clean_mode
+        logger.info(f"Modo de ejecución guardado en settings: {clean_mode}")
+        self.save()
+
+    def is_turbo_mode(self) -> bool:
+        """Indica si el modo turbo con micro-batching está activado."""
+        return bool(self._settings_data.get("turbo_mode", False))
+
+    def get_turbo_mode(self) -> bool:
+        """Alias para is_turbo_mode()."""
+        return self.is_turbo_mode()
+
+    def set_turbo_mode(self, enabled: bool) -> None:
+        """Activa o desactiva el modo turbo en la configuración."""
+        self._settings_data["turbo_mode"] = bool(enabled)
+        logger.info(f"Modo turbo guardado en settings: {enabled}")
+        self.save()
+
+    def get_mcp_servers(self) -> List[Any]:
+        """Retorna la lista de servidores MCP configurados como MCPServerConfig."""
+        from core.interfaces import MCPServerConfig
+        raw_list = self._settings_data.get("mcp_servers", [])
+        result = []
+        for item in raw_list:
+            if isinstance(item, MCPServerConfig):
+                result.append(item)
+            elif isinstance(item, dict):
+                result.append(MCPServerConfig(
+                    name=item.get("name", ""),
+                    command=item.get("command", ""),
+                    args=item.get("args", []),
+                    env=item.get("env"),
+                    enabled=item.get("enabled", True),
+                ))
+        return result
+
+    def add_mcp_server(
+        self,
+        name_or_config: Any,
+        command: Optional[str] = None,
+        args: Optional[List[str]] = None,
+        env: Optional[Dict[str, str]] = None,
+        enabled: bool = True
+    ) -> bool:
+        """Registra una configuración persistente de servidor MCP. Rechaza nombres duplicados."""
+        if hasattr(name_or_config, "name"):
+            clean_name = name_or_config.name.strip()
+            cmd = name_or_config.command
+            arguments = name_or_config.args
+            environ = getattr(name_or_config, "env", None) or {}
+            is_enabled = getattr(name_or_config, "enabled", True)
+        else:
+            clean_name = str(name_or_config).strip()
+            cmd = command or ""
+            arguments = args or []
+            environ = env or {}
+            is_enabled = enabled
+
+        if not clean_name:
+            return False
+
+        if "mcp_servers" not in self._settings_data:
+            self._settings_data["mcp_servers"] = []
+
+        servers = self._settings_data["mcp_servers"]
+        for s in servers:
+            s_name = s.name if hasattr(s, "name") else s.get("name")
+            if s_name == clean_name:
+                logger.warning(f"Servidor MCP '{clean_name}' ya existe en settings.")
+                return False
+
+        servers.append({
+            "name": clean_name,
+            "command": cmd,
+            "args": arguments,
+            "env": environ,
+            "enabled": is_enabled,
+        })
+        logger.info(f"Servidor MCP '{clean_name}' agregado a settings.")
+        return self.save()
+
+    def remove_mcp_server(self, name: str) -> bool:
+        """Elimina la configuración persistente de un servidor MCP."""
+        if "mcp_servers" not in self._settings_data:
+            return False
+        servers = self._settings_data["mcp_servers"]
+        initial_len = len(servers)
+        self._settings_data["mcp_servers"] = [
+            s for s in servers
+            if (s.name if hasattr(s, "name") else s.get("name")) != name
+        ]
+        if len(self._settings_data["mcp_servers"]) < initial_len:
+            logger.info(f"Servidor MCP '{name}' eliminado de settings.")
+            return self.save()
+        return False
+
+    def set_mcp_server_enabled(self, name: str, enabled: bool) -> bool:
+        """Habilita o deshabilita un servidor MCP en settings."""
+        if "mcp_servers" not in self._settings_data:
+            return False
+        found = False
+        for s in self._settings_data["mcp_servers"]:
+            s_name = s.name if hasattr(s, "name") else s.get("name")
+            if s_name == name:
+                if hasattr(s, "enabled"):
+                    s.enabled = enabled
+                else:
+                    s["enabled"] = enabled
+                found = True
+        if found:
+            return self.save()
+        return False
+
 

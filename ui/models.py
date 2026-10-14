@@ -67,6 +67,8 @@ class ChatModel:
         matched = self._find_matching_provider(default_prov)
         self._selected_provider: str = matched or self._providers[0]
         self._selected_model: str = self._settings_manager.get_default_model(self._selected_provider)
+        self._execution_mode: str = getattr(self._settings_manager, "get_execution_mode", lambda: "immediate")()
+        self._turbo_mode: bool = getattr(self._settings_manager, "is_turbo_mode", lambda: False)()
         self._status: str = "Listo"
         self._is_loading: bool = False
         self._listeners: List[Callable[[], None]] = []
@@ -140,6 +142,32 @@ class ChatModel:
             if models:
                 return models
         return list(self.DEFAULT_MODELS_MAP.get(self._selected_provider, ["default"]))
+
+    @property
+    def execution_mode(self) -> str:
+        """Obtiene el modo de ejecución activo ('immediate' o 'plan_and_confirm')."""
+        return self._execution_mode
+
+    def set_execution_mode(self, mode: str) -> None:
+        """Actualiza el modo de ejecución activo y lo notifica a la vista."""
+        clean_mode = "plan_and_confirm" if "plan" in mode.lower() else "immediate"
+        self._execution_mode = clean_mode
+        if hasattr(self._settings_manager, "set_execution_mode"):
+            self._settings_manager.set_execution_mode(clean_mode)
+        self._notify()
+
+    @property
+    def turbo_mode(self) -> bool:
+        """Indica si el modo turbo con micro-batching está activado."""
+        return self._turbo_mode
+
+    def set_turbo_mode(self, enabled: bool) -> None:
+        """Activa o desactiva el modo turbo y lo notifica a la vista."""
+        self._turbo_mode = bool(enabled)
+        if hasattr(self._settings_manager, "set_turbo_mode"):
+            self._settings_manager.set_turbo_mode(self._turbo_mode)
+        self._notify()
+
 
     def _find_matching_provider(self, provider_query: Optional[str]) -> Optional[str]:
         """Busca el nombre canónico del proveedor de forma tolerante a mayúsculas y formatos."""

@@ -48,6 +48,13 @@ def _mock_rectangle_factory(*args, **kwargs):
     m.style = kwargs.get("style", {})
     return m
 
+def _mock_collapsible_factory(*args, **kwargs):
+    m = MagicMock()
+    m.title = args[0] if args else kwargs.get("title", "")
+    m.collapsed = kwargs.get("collapsed", False)
+    m.style = kwargs.get("style", {})
+    return m
+
 class AutoMockModule(ModuleType):
     """Módulo mock dinámico que devuelve MagicMocks para cualquier atributo."""
     __test__ = False
@@ -69,6 +76,10 @@ class AutoMockModule(ModuleType):
                 return val
             if name == 'Rectangle':
                 val = MagicMock(side_effect=_mock_rectangle_factory)
+                setattr(self, name, val)
+                return val
+            if name == 'CollapsibleFrame':
+                val = MagicMock(side_effect=_mock_collapsible_factory)
                 setattr(self, name, val)
                 return val
         if name.startswith('__') and name.endswith('__'):

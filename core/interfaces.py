@@ -110,15 +110,48 @@ class ChatSession:
             metadata=metadata,
         )
 
+from enum import Enum
+
+class ExecutionMode(str, Enum):
+    """Modos de ejecución de comandos espaciales en OpenUSD."""
+    IMMEDIATE = "immediate"  # ⚡ Fast Act / Ejecución autónoma instantánea
+    PLAN_AND_CONFIRM = "plan_and_confirm"  # 📝 Jules / Gemini CLI style: Plan primero, confirmación requerida
+
+@dataclass
+class MCPServerConfig:
+    """Configuración para registrar y orquestar servidores MCP."""
+    name: str
+    command: str
+    args: List[str]
+    env: Optional[Dict[str, str]] = None
+    enabled: bool = True
+
+    def __getitem__(self, key: str) -> Any:
+        return getattr(self, key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return getattr(self, key, default)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "name": self.name,
+            "command": self.command,
+            "args": list(self.args),
+            "env": dict(self.env) if self.env else {},
+            "enabled": self.enabled,
+        }
+
 @dataclass
 class InferenceConfig:
-    provider: str  # "lm_studio", "ollama", "vllm", "cloud"
-    base_url: str
-    model: str
+    provider: Optional[str] = None  # "lm_studio", "ollama", "vllm", "cloud"
+    base_url: Optional[str] = None
+    model: Optional[str] = None
     api_key: Optional[str] = None
     temperature: float = 0.2
     max_tokens: int = 4096
     timeout: float = 600.0
+    turbo_mode: bool = False
+    is_reasoning: bool = False
 
 class IInferenceRouter(ABC):
     """Contrato para el Router Multi-Proveedor de Inferencia (Jules Issue #35)."""
@@ -142,6 +175,35 @@ class IStageContextSerializer(ABC):
     @abstractmethod
     def get_prim_summary(self, prim_path: str) -> Dict[str, Any]:
         """Extrae atributos específicos de un prim para alimentar el razonamiento del LLM."""
+        pass
+
+class IUSDInspector(ABC):
+    """Contrato para inspección y auditoría de salud del proyecto OpenUSD (Plan 02)."""
+    @abstractmethod
+    def audit_missing_assets(self) -> List[Dict[str, Any]]:
+        """Escanea todos los atributos Sdf.AssetPath en el Stage y valida la existencia de archivos."""
+        pass
+
+    @abstractmethod
+    def find_prims_by_query(self, query_criteria: Dict[str, Any]) -> List[str]:
+        """Busca prims en el Stage según criterios semánticos (tipo, visibilidad, atributos)."""
+        pass
+
+    @abstractmethod
+    def get_layer_stack_status(self) -> Dict[str, Any]:
+        """Informa sobre el estado de la pila de capas (capa raíz, capas sucias, anónimas)."""
+        pass
+
+class IAgentPolicy(ABC):
+    """Contrato para directivas de seguridad y gobernanza de agentes espaciales."""
+    @abstractmethod
+    def validate_code(self, python_code: str) -> tuple[bool, Optional[str]]:
+        """Valida que el código generado no viole las políticas de seguridad espacial antes de ejecutar."""
+        pass
+
+    @abstractmethod
+    def is_prim_protected(self, prim_path: str) -> bool:
+        """Determina si una ruta en el Stage corresponde a un elemento protegido del sistema."""
         pass
 
 class IMCPClientRegistry(ABC):
@@ -324,5 +386,41 @@ class ISettingsManager(ABC):
     async def fetch_remote_models(self, provider_name: str) -> List[str]:
         """Consulta en tiempo real el endpoint del proveedor (/v1/models o /api/tags) y retorna los modelos vivos disponibles."""
         pass
+
+    def get_execution_mode(self) -> str:
+        """Obtiene el modo de ejecución activo ('immediate' o 'plan_and_confirm')."""
+        return ExecutionMode.IMMEDIATE.value
+
+    def set_execution_mode(self, mode: str) -> None:
+        """Establece el modo de ejecución activo."""
+        pass
+
+    def is_turbo_mode(self) -> bool:
+        """Indica si el modo turbo con micro-batching está activado."""
+        return False
+
+    def set_turbo_mode(self, enabled: bool) -> None:
+        """Activa o desactiva el modo turbo."""
+        pass
+
+    def get_mcp_servers(self) -> List[Dict[str, Any]]:
+        """Retorna la lista de servidores MCP configurados."""
+        return []
+
+    def add_mcp_server(
+        self,
+        name: str,
+        command: str,
+        args: List[str],
+        env: Optional[Dict[str, str]] = None,
+        enabled: bool = True
+    ) -> bool:
+        """Registra una configuración persistente de servidor MCP."""
+        return False
+
+    def remove_mcp_server(self, name: str) -> bool:
+        """Elimina la configuración persistente de un servidor MCP."""
+        return False
+
 
 

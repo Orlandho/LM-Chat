@@ -11,6 +11,7 @@ import os
 import re
 import json
 import uuid
+import time
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 
@@ -124,8 +125,18 @@ class LocalChatHistoryManager(IChatHistoryManager):
             return None
 
         try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
+            data = None
+            for _attempt in range(5):
+                try:
+                    with open(file_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    break
+                except PermissionError:
+                    time.sleep(0.015)
+            if data is None:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+
             if not isinstance(data, dict):
                 return None
             return ChatSession.from_dict(data)
@@ -154,8 +165,17 @@ class LocalChatHistoryManager(IChatHistoryManager):
 
             file_path = os.path.join(self._storage_dir, fname)
             try:
-                with open(file_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
+                data = None
+                for _attempt in range(5):
+                    try:
+                        with open(file_path, "r", encoding="utf-8") as f:
+                            data = json.load(f)
+                        break
+                    except PermissionError:
+                        time.sleep(0.015)
+                if data is None:
+                    with open(file_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
 
                 if not isinstance(data, dict):
                     continue

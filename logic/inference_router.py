@@ -12,11 +12,14 @@ Gemini 2.0 Flash, NVIDIA NIM Nemotron-70B, Ollama/LM Studio) and provides deep d
 on any communication failure.
 """
 
+from __future__ import annotations
+
 import os
+import re
 import asyncio
 import json
 import time
-from typing import AsyncGenerator, Dict, List, Optional, Any
+from typing import AsyncGenerator, Dict, List, Optional, Any, Tuple
 import aiohttp
 
 from logic.logger import get_logger
@@ -24,6 +27,134 @@ from logic.diagnostics import diagnose_inference_failure, ErrorDiagnostic
 
 
 logger = get_logger("InferenceRouter")
+
+REASONING_MODEL_PATTERNS: List[str] = [
+    r"^o1(-mini|-preview)?",
+    r"^o3(-mini)?",
+    r"deepseek-r1",
+    r"deepseek-reasoner",
+    r"reasoner",
+    r"qwq",
+    r".*thinking.*",
+    r".*-r1.*",
+    r"claude-3-7",
+    r"deepseek-v4",
+]
+
+
+def is_reasoning_model(model_name: str) -> bool:
+    """Evalúa si un modelo cuenta con capacidades de razonamiento extendido (Plan 01)."""
+    if not model_name:
+        return False
+    clean_name = model_name.lower().strip()
+    return any(re.search(pat, clean_name) for pat in REASONING_MODEL_PATTERNS)
+
+
+class StreamingReasoningParser:
+    """
+    Parser incremental para flujos SSE que separa bloques de pensamiento (<think>...</think>)
+    del contenido final, incluso cuando las etiquetas están fragmentadas entre chunks.
+    """
+
+    def __init__(self) -> None:
+        self._in_think: bool = False
+        self._buffer: str = ""
+
+    @property
+    def in_thinking_phase(self) -> bool:
+        """Retorna True si el parser está actualmente dentro de un bloque de pensamiento."""
+        return self._in_think
+
+    def process_chunk(self, text: str) -> List[Dict[str, str]]:
+        """
+        Procesa un fragmento de texto y retorna lista de fragmentos categorizados:
+        [{"type": "reasoning" | "content", "text": str}, ...]
+        """
+        if not text:
+            return []
+
+        self._buffer += text
+        results: List[Dict[str, str]] = []
+
+        while self._buffer:
+            if not self._in_think:
+                tag_idx = self._buffer.find("<think>")
+                if tag_idx != -1:
+                    if tag_idx > 0:
+                        content_part = self._buffer[:tag_idx]
+                        results.append({"type": "content", "text": content_part})
+                    self._buffer = self._buffer[tag_idx + len("<think>"):]
+                    self._in_think = True
+                else:
+                    # Comprobar si el final del buffer tiene un prefijo parcial de <think>
+                    held = 0
+                    for i in range(1, len("<think>")):
+                        if self._buffer.endswith("<think>"[:i]):
+                            held = i
+                            break
+                    if held > 0:
+                        emit_part = self._buffer[:-held]
+                        if emit_part:
+                            results.append({"type": "content", "text": emit_part})
+                        self._buffer = self._buffer[-held:]
+                        break
+                    else:
+                        results.append({"type": "content", "text": self._buffer})
+                        self._buffer = ""
+                        break
+            else:
+                tag_idx = self._buffer.find("</think>")
+                if tag_idx != -1:
+                    if tag_idx > 0:
+                        reasoning_part = self._buffer[:tag_idx]
+                        results.append({"type": "reasoning", "text": reasoning_part})
+                    self._buffer = self._buffer[tag_idx + len("</think>"):]
+                    self._in_think = False
+                else:
+                    held = 0
+                    for i in range(1, len("</think>")):
+                        if self._buffer.endswith("</think>"[:i]):
+                            held = i
+                            break
+                    if held > 0:
+                        emit_part = self._buffer[:-held]
+                        if emit_part:
+                            results.append({"type": "reasoning", "text": emit_part})
+                        self._buffer = self._buffer[-held:]
+                        break
+                    else:
+                        results.append({"type": "reasoning", "text": self._buffer})
+                        self._buffer = ""
+                        break
+
+        return results
+
+    def flush(self) -> List[Dict[str, str]]:
+        """Descarga el contenido residual del buffer al finalizar el stream."""
+        results: List[Dict[str, str]] = []
+        if self._buffer:
+            res_type = "reasoning" if self._in_think else "content"
+            results.append({"type": res_type, "text": self._buffer})
+            self._buffer = ""
+        self._in_think = False
+        return results
+
+    def feed_chunk(self, text: str = "", reasoning_chunk: str = "") -> Tuple[str, str]:
+        """
+        Método de conveniencia que procesa texto o razonamiento nativo, retornando (thoughts, content).
+        """
+        thoughts = []
+        contents = []
+        if reasoning_chunk:
+            thoughts.append(reasoning_chunk)
+        if text:
+            items = self.process_chunk(text)
+            for item in items:
+                if item["type"] == "reasoning":
+                    thoughts.append(item["text"])
+                else:
+                    contents.append(item["text"])
+        return "".join(thoughts), "".join(contents)
 
 
 class InferenceRouter:
@@ -276,21 +407,45 @@ class InferenceRouter:
             "stream": stream,
         }
 
-        # Check for OpenAI reasoning models (o1, o3-mini, etc.) which reject 'temperature'
-        is_openai_reasoning = any(
-            target_model.lower().startswith(prefix) for prefix in ("o1", "o3", "o1-mini", "o3-mini", "o1-preview")
-        )
-        if not is_openai_reasoning:
+        # Check for reasoning models which reject 'temperature' and require 'max_completion_tokens'
+        is_reasoning = is_reasoning_model(target_model)
+
+        if not is_reasoning:
             payload["temperature"] = temperature
 
         # Handle max_tokens vs max_completion_tokens for reasoning models
         for k, v in kwargs.items():
-            if is_openai_reasoning and k == "max_tokens":
+            if is_reasoning and k == "max_tokens":
                 payload["max_completion_tokens"] = v
-            elif k not in payload:
+            elif k not in payload and k not in ("turbo_mode", "turbo"):
                 payload[k] = v
 
+        if is_reasoning and "max_completion_tokens" not in payload:
+            payload["max_completion_tokens"] = kwargs.get("max_tokens", 4096)
+
         return payload
+
+    def _build_payload(
+        self,
+        messages: Any,
+        config: Optional[InferenceConfig] = None,
+        stream: bool = False,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """Construye el payload adaptativo para la API a partir de mensajes y configuración."""
+        raw_msgs = []
+        for m in messages:
+            if hasattr(m, "role") and hasattr(m, "content"):
+                raw_msgs.append({"role": m.role, "content": m.content})
+            elif isinstance(m, dict):
+                raw_msgs.append(m)
+            else:
+                raw_msgs.append({"role": "user", "content": str(m)})
+
+        temp = config.temperature if (config and config.temperature is not None) else kwargs.get("temperature", 0.7)
+        max_tok = config.max_tokens if (config and config.max_tokens is not None) else kwargs.get("max_tokens", 4096)
+        mod = (config.model if config and config.model else None) or kwargs.get("model") or self._model
+        return self._prepare_payload(raw_msgs, model=mod, temperature=temp, stream=stream, max_tokens=max_tok, **kwargs)
 
     def get_endpoint_url(self, path: str = "/chat/completions") -> str:
         """
@@ -489,6 +644,7 @@ class InferenceRouter:
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Asynchronously streams chat completion responses chunk-by-chunk using Server-Sent Events (SSE).
+        Supports reasoning/thinking token separation (Plan 01) and Turbo Mode micro-batching.
 
         Args:
             messages (List[Dict[str, str]]): Conversation history messages.
@@ -548,6 +704,11 @@ class InferenceRouter:
 
                     # Read SSE stream line by line
                     token_count = 0
+                    reasoning_parser = StreamingReasoningParser()
+                    turbo_mode = kwargs.get("turbo_mode", False) or kwargs.get("turbo", False)
+                    turbo_buffer = ""
+                    last_turbo_yield = time.monotonic()
+
                     async for raw_line in response.content:
                         line = raw_line.decode("utf-8", errors="replace").strip()
                         if not line or line.startswith(":"):
@@ -567,15 +728,44 @@ class InferenceRouter:
                                     delta_type = delta_obj.get("type")
                                     if delta_type == "text_delta":
                                         chunk_text = delta_obj.get("text", "")
-                                        token_count += 1
-                                        yield {
-                                            "success": True,
-                                            "data": {
-                                                "choices": [
-                                                    {"delta": {"content": chunk_text}}
-                                                ]
-                                            },
-                                        }
+                                        parts = reasoning_parser.process_chunk(chunk_text)
+                                        for part in parts:
+                                            if part["type"] == "reasoning":
+                                                token_count += 1
+                                                yield {
+                                                    "success": True,
+                                                    "data": {
+                                                        "choices": [
+                                                            {"delta": {"content": "", "reasoning_content": part["text"]}}
+                                                        ]
+                                                    },
+                                                }
+                                            else:
+                                                if turbo_mode:
+                                                    turbo_buffer += part["text"]
+                                                    now = time.monotonic()
+                                                    if len(turbo_buffer) >= 16 or (now - last_turbo_yield) >= 0.02:
+                                                        token_count += 1
+                                                        yield {
+                                                            "success": True,
+                                                            "data": {
+                                                                "choices": [
+                                                                    {"delta": {"content": turbo_buffer}}
+                                                                ]
+                                                            },
+                                                        }
+                                                        turbo_buffer = ""
+                                                        last_turbo_yield = now
+                                                else:
+                                                    token_count += 1
+                                                    yield {
+                                                        "success": True,
+                                                        "data": {
+                                                            "choices": [
+                                                                {"delta": {"content": part["text"]}}
+                                                            ]
+                                                        },
+                                                    }
                                     elif delta_type == "thinking_delta":
                                         chunk_text = delta_obj.get("thinking", "")
                                         token_count += 1
@@ -611,12 +801,92 @@ class InferenceRouter:
                                         choices = data_json.get("choices", [])
                                         if choices and isinstance(choices[0], dict):
                                             delta = choices[0].get("delta", {})
-                                            if isinstance(delta, dict) and delta.get("content") is None:
-                                                delta["content"] = ""
-                                        token_count += 1
-                                        yield {"success": True, "data": data_json}
+                                            if isinstance(delta, dict):
+                                                exp_reasoning = delta.get("reasoning_content") or delta.get("reasoning") or delta.get("thought")
+                                                raw_content = delta.get("content")
+
+                                                if exp_reasoning:
+                                                    token_count += 1
+                                                    yield {
+                                                        "success": True,
+                                                        "data": {
+                                                            "choices": [
+                                                                {"delta": {"content": "", "reasoning_content": exp_reasoning}}
+                                                            ]
+                                                        },
+                                                    }
+
+                                                if raw_content:
+                                                    parts = reasoning_parser.process_chunk(raw_content)
+                                                    for part in parts:
+                                                        if part["type"] == "reasoning":
+                                                            token_count += 1
+                                                            yield {
+                                                                "success": True,
+                                                                "data": {
+                                                                    "choices": [
+                                                                        {"delta": {"content": "", "reasoning_content": part["text"]}}
+                                                                    ]
+                                                                },
+                                                            }
+                                                        else:
+                                                            if turbo_mode:
+                                                                turbo_buffer += part["text"]
+                                                                now = time.monotonic()
+                                                                if len(turbo_buffer) >= 16 or (now - last_turbo_yield) >= 0.02:
+                                                                    token_count += 1
+                                                                    yield {
+                                                                        "success": True,
+                                                                        "data": {
+                                                                            "choices": [
+                                                                                {"delta": {"content": turbo_buffer}}
+                                                                            ]
+                                                                        },
+                                                                    }
+                                                                    turbo_buffer = ""
+                                                                    last_turbo_yield = now
+                                                            else:
+                                                                token_count += 1
+                                                                yield {
+                                                                    "success": True,
+                                                                    "data": {
+                                                                        "choices": [
+                                                                            {"delta": {"content": part["text"]}}
+                                                                        ]
+                                                                    },
+                                                                }
+                                                elif not exp_reasoning:
+                                                    token_count += 1
+                                                    yield {"success": True, "data": data_json}
                             except json.JSONDecodeError:
                                 continue
+
+                    # Flush remaining buffers
+                    for part in reasoning_parser.flush():
+                        if part["type"] == "reasoning":
+                            token_count += 1
+                            yield {
+                                "success": True,
+                                "data": {
+                                    "choices": [
+                                        {"delta": {"content": "", "reasoning_content": part["text"]}}
+                                    ]
+                                },
+                            }
+                        else:
+                            turbo_buffer += part["text"]
+
+                    if turbo_buffer:
+                        token_count += 1
+                        yield {
+                            "success": True,
+                            "data": {
+                                "choices": [
+                                    {"delta": {"content": turbo_buffer}}
+                                ]
+                            },
+                        }
+                        turbo_buffer = ""
 
                     elapsed = round(time.monotonic() - start_time, 2)
                     logger.debug(f"SSE stream finalizado con {self._provider} ({token_count} chunks en {elapsed}s)")

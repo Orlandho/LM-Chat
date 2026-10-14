@@ -1,16 +1,22 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 Orlando Dorival. All rights reserved.
+# SPDX-License-Identifier: MIT
+
 # -*- coding: utf-8 -*-
 
 """
 Agent Manager Module for Omniverse Agentic AI System.
 
 Orchestrates conversation history, inference routing across providers,
-structured logging, diagnostic error handling, and the ReAct Reflection Loop
-for autonomous OpenUSD code generation and execution.
+structured logging, diagnostic error handling, reasoning model awareness (Plan 01),
+spatial governance policies, execution mode selection (Plan 03: Immediate vs Plan & Confirm),
+Turbo Mode, and MCP tools integration.
 """
 
 import asyncio
 import re
 from typing import Optional, Callable, Dict, Any, List
+
+from core.interfaces import ExecutionMode, IMCPClientRegistry
 from .inference_router import InferenceRouter
 from .usd_controller import USDController
 from logic.logger import get_logger
@@ -22,7 +28,7 @@ logger = get_logger("AgentManager")
 
 
 class AgentManager:
-    """Orchestrates conversations, provider routing, and ReAct Reflection Loop logic."""
+    """Orchestrates conversations, provider routing, reasoning streams, and execution modes."""
 
     def __init__(
         self,
@@ -31,9 +37,11 @@ class AgentManager:
         base_url: Optional[str] = None,
         api_key: Optional[str] = None,
         model: Optional[str] = None,
+        execution_mode: str = ExecutionMode.IMMEDIATE.value,
+        mcp_registry: Optional[IMCPClientRegistry] = None,
     ) -> None:
         """
-        Initializes the AgentManager with inference router and USD controller.
+        Initializes the AgentManager with inference router, USD controller, and execution mode.
 
         Args:
             router (Optional[InferenceRouter]): Pre-configured InferenceRouter instance.
@@ -41,6 +49,8 @@ class AgentManager:
             base_url (Optional[str]): Custom base URL if router is not supplied.
             api_key (Optional[str]): API key for authentication if router is not supplied.
             model (Optional[str]): Model name if router is not supplied.
+            execution_mode (str): 'immediate' or 'plan_and_confirm'.
+            mcp_registry (Optional[IMCPClientRegistry]): Registry for MCP tools.
         """
         if router:
             self._router = router
@@ -50,20 +60,77 @@ class AgentManager:
             )
 
         self._usd_controller = USDController()
-        self._system_prompt = (
+        self._execution_mode: str = execution_mode
+        self._pending_code: Optional[str] = None
+        self._turbo_mode: bool = False
+        self._mcp_registry: Optional[IMCPClientRegistry] = mcp_registry
+
+        self._system_prompt = self._get_system_prompt_for_mode(self._execution_mode)
+        self._messages: List[Dict[str, str]] = [
+            {"role": "system", "content": self._system_prompt}
+        ]
+        logger.info(
+            f"AgentManager inicializado con router={self._router.provider} ({self._router.model}) "
+            f"| modo={self._execution_mode}"
+        )
+
+    def _get_system_prompt_for_mode(self, mode: str) -> str:
+        """Genera la directiva del sistema adaptada al modo de ejecución activo."""
+        if mode == ExecutionMode.PLAN_AND_CONFIRM.value or mode == "plan_and_confirm":
+            return (
+                "Eres un asistente de IA avanzado para NVIDIA Omniverse. Operas en MODO PLAN & REVISIÓN (Jules / Gemini CLI style). "
+                "Cuando el usuario te solicite crear, instanciar o modificar objetos 3D: "
+                "1. Presenta primero una breve lista numerada con los pasos de tu plan de acción. "
+                "2. Muestra el bloque de código Python usando omni.usd y pxr dentro de un bloque delimitado por ```python y ``` "
+                "sin asumir que ya ha sido ejecutado. Espera la confirmación interactiva del usuario antes de aplicar cambios en el Stage."
+            )
+        return (
             "Eres un asistente de IA avanzado para NVIDIA Omniverse. Puedes conversar libremente y ayudar al usuario con cualquier duda. "
             "SIN EMBARGO, si el usuario te pide crear, instanciar o modificar objetos 3D, debes cumplir su orden escribiendo el código en Python "
             "usando omni.usd y pxr dentro de un bloque delimitado por ```python y ```. Puedes acompañar el código con una explicación amigable."
         )
-        self._messages: List[Dict[str, str]] = [
-            {"role": "system", "content": self._system_prompt}
-        ]
-        logger.info(f"AgentManager inicializado con router={self._router.provider} ({self._router.model})")
 
     @property
     def router(self) -> InferenceRouter:
         """Returns the current InferenceRouter instance."""
         return self._router
+
+    @property
+    def usd_controller(self) -> USDController:
+        """Acceso al controlador de ejecución OpenUSD."""
+        return self._usd_controller
+
+    @property
+    def execution_mode(self) -> str:
+        """Modo de ejecución actual ('immediate' o 'plan_and_confirm')."""
+        return self._execution_mode
+
+    def set_execution_mode(self, mode: str) -> None:
+        """Actualiza el modo de ejecución y sincroniza el system prompt."""
+        self._execution_mode = mode
+        self._system_prompt = self._get_system_prompt_for_mode(mode)
+        if self._messages and self._messages[0]["role"] == "system":
+            self._messages[0]["content"] = self._system_prompt
+        logger.info(f"Modo de ejecución actualizado a: {mode}")
+
+    @property
+    def turbo_mode(self) -> bool:
+        """Indica si el modo turbo con micro-batching está activo."""
+        return self._turbo_mode
+
+    def set_turbo_mode(self, enabled: bool) -> None:
+        """Habilita o deshabilita el modo turbo."""
+        self._turbo_mode = enabled
+        logger.info(f"Modo Turbo establecido en: {enabled}")
+
+    @property
+    def mcp_registry(self) -> Optional[IMCPClientRegistry]:
+        """Registro de clientes MCP activo."""
+        return self._mcp_registry
+
+    def set_mcp_registry(self, registry: Optional[IMCPClientRegistry]) -> None:
+        """Configura el registro de herramientas MCP."""
+        self._mcp_registry = registry
 
     def set_provider(
         self,
@@ -72,26 +139,14 @@ class AgentManager:
         model: Optional[str] = None,
         api_key: Optional[str] = None,
     ) -> None:
-        """
-        Updates the underlying inference provider configuration.
-
-        Args:
-            provider (str): Provider identifier ('lm_studio', 'ollama', 'vllm', 'cloud', etc.).
-            base_url (Optional[str]): Base URL override.
-            model (Optional[str]): Model identifier.
-            api_key (Optional[str]): API key for cloud providers.
-        """
+        """Updates the underlying inference provider configuration."""
         logger.info(f"Cambiando proveedor de AgentManager a {provider} ({model})")
         self._router.set_provider(
             provider=provider, base_url=base_url, model=model, api_key=api_key
         )
 
     def load_session_messages(self, messages: List[Any]) -> None:
-        """Sincroniza el contexto conversacional del LLM con una sesión cargada.
-
-        Args:
-            messages (List[Any]): Lista de ChatMessage o diccionarios con rol y contenido.
-        """
+        """Sincroniza el contexto conversacional del LLM con una sesión cargada."""
         self._messages = [{"role": "system", "content": self._system_prompt}]
         for msg in messages:
             if hasattr(msg, "role") and hasattr(msg, "content"):
@@ -112,26 +167,68 @@ class AgentManager:
 
     def reset_conversation(self) -> None:
         """Reinicia el contexto de conversación reteniendo el system prompt."""
+        self._pending_code = None
         self._messages = [{"role": "system", "content": self._system_prompt}]
         logger.info("Conversación reiniciada reteniendo system prompt")
+
+    def has_pending_code(self) -> bool:
+        """Retorna True si hay un bloque de código propuesto esperando confirmación del usuario."""
+        return self._pending_code is not None
+
+    def get_pending_code(self) -> Optional[str]:
+        """Retorna el código propuesto pendiente de confirmación."""
+        return self._pending_code
+
+    def execute_pending_code(self) -> Dict[str, Any]:
+        """
+        Ejecuta en el Stage OpenUSD el código previamente propuesto en Modo Plan & Confirm.
+
+        Returns:
+            Dict[str, Any]: Resultado de la ejecución con status 'success' y detalles.
+        """
+        if not self._pending_code:
+            return {"success": False, "error_msg": "No hay código pendiente de confirmación para ejecutar."}
+
+        code_to_exec = self._pending_code
+        self._pending_code = None
+        logger.info("Ejecutando código propuesto tras confirmación interactiva del usuario...")
+        res = self._usd_controller.execute_code(code_to_exec)
+        return res
+
+    def cancel_pending_code(self) -> Dict[str, Any]:
+        """
+        Descarta el código propuesto en Modo Plan & Confirm dejando la escena intacta.
+
+        Returns:
+            Dict[str, Any]: Confirmación de cancelación.
+        """
+        self._pending_code = None
+        logger.info("Propuesta de código descartada por el usuario. Escena OpenUSD intacta.")
+        return {"success": True, "cancelled": True}
 
     async def process_prompt(
         self,
         prompt: str,
         append_callback: Optional[Callable[[str], None]] = None,
         ui_feedback_callback: Optional[Callable[[str, str], None]] = None,
+        reasoning_callback: Optional[Callable[[str], None]] = None,
+        confirmation_callback: Optional[Callable[[str, Dict[str, Any]], None]] = None,
     ) -> str:
         """
-        Asynchronously processes a prompt, communicates with LLM via router, and handles ReAct loop.
+        Asynchronously processes a prompt, communicates with LLM via router, handles reasoning
+        token separation (Plan 01), and respects execution modes (Plan 03).
 
         Args:
             prompt (str): The user input prompt.
             append_callback (Optional[Callable[[str], None]]): Callback to append stream chunks to UI.
             ui_feedback_callback (Optional[Callable[[str, str], None]]): Callback for UI feedback bubbles.
+            reasoning_callback (Optional[Callable[[str], None]]): Callback for thinking/reasoning chunks.
+            confirmation_callback (Optional[Callable[[str, Dict[str, Any]], None]]): Callback when code needs confirmation.
 
         Returns:
             str: Final response string or error summary.
         """
+        self._pending_code = None
         self._messages.append({"role": "user", "content": prompt})
         logger.info(f"Procesando prompt de usuario: '{prompt[:60]}...'")
 
@@ -140,22 +237,34 @@ class AgentManager:
         for attempt in range(max_retries + 1):
             try:
                 full_content = ""
+                full_reasoning = ""
                 error_occurred = False
                 error_message = ""
 
-                # Stream response via InferenceRouter
-                async for chunk_obj in self._router.stream_chat_completions(self._messages):
+                # Stream response via InferenceRouter with Turbo Mode support
+                async for chunk_obj in self._router.stream_chat_completions(
+                    self._messages,
+                    turbo_mode=self._turbo_mode,
+                ):
                     if chunk_obj.get("success"):
                         data = chunk_obj.get("data", {})
                         choices = data.get("choices", [{}])
                         if choices:
                             delta = choices[0].get("delta", {})
-                            chunk = delta.get("content", "")
+                            content_chunk = delta.get("content", "")
+                            reasoning_chunk = delta.get("reasoning_content", "")
 
-                            if chunk:
-                                full_content += chunk
+                            # Enviar tokens de razonamiento al widget de pensamiento
+                            if reasoning_chunk:
+                                full_reasoning += reasoning_chunk
+                                if reasoning_callback:
+                                    reasoning_callback(reasoning_chunk)
+
+                            # Enviar tokens de respuesta final al chat principal
+                            if content_chunk:
+                                full_content += content_chunk
                                 if append_callback:
-                                    append_callback(chunk)
+                                    append_callback(content_chunk)
                     else:
                         error_occurred = True
                         error_type = chunk_obj.get("error_type")
@@ -191,9 +300,35 @@ class AgentManager:
                 # Strip reasoning thinking tags (<think>...</think>) from DeepSeek-R1 to avoid executing draft code
                 cleaned_content = re.sub(r"<think>.*?</think>", "", full_content, flags=re.DOTALL)
                 matches = _PYTHON_CODE_PATTERN.findall(cleaned_content)
+
                 if matches:
                     extracted_code = matches[-1].strip()
-                    logger.info("Detectado bloque de código OpenUSD generado por el modelo. Ejecutando...")
+
+                    # PLAN 03: Diferenciación de Modos de Ejecución
+                    is_plan_mode = (
+                        self._execution_mode == ExecutionMode.PLAN_AND_CONFIRM.value
+                        or self._execution_mode == "plan_and_confirm"
+                    )
+
+                    if is_plan_mode:
+                        # Modo Plan & Confirmación (Jules / Gemini CLI style)
+                        # No ejecutar directamente. Guardar código y solicitar confirmación interactiva al usuario.
+                        self._pending_code = extracted_code
+                        self._messages.append({"role": "assistant", "content": full_content})
+                        logger.info("Modo Plan & Confirm: Propuesta de código retenida en espera de confirmación interactiva.")
+
+                        if confirmation_callback:
+                            plan_desc = cleaned_content.split("```python")[0].strip()
+                            confirmation_callback(extracted_code, {"plan": plan_desc or full_content})
+
+                        confirm_prompt = "\n\n[Sistema: Plan y código listos. Esperando confirmación para ejecutar en escena...]"
+                        if append_callback:
+                            append_callback(confirm_prompt)
+
+                        return full_content + confirm_prompt
+
+                    # Modo Inmediato (⚡ Fast Act / Autónomo)
+                    logger.info("Modo Inmediato: Detectado bloque de código OpenUSD. Ejecutando de forma autónoma...")
                     exec_result = self._usd_controller.execute_code(extracted_code)
 
                     if exec_result.get("success"):

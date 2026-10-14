@@ -51,6 +51,7 @@ class LMChatExtension(omni.ext.IExt):
             model=self._model,
         )
         self._chat_window.set_session_changed_callback(self._on_session_changed)
+        self._chat_window.delegate.set_plan_action_callback(self._on_plan_action)
 
         # Sync active model configuration to AgentManager
         self._on_model_updated()
@@ -63,9 +64,33 @@ class LMChatExtension(omni.ext.IExt):
                 self._chat_window.rebuild_messages_ui()
                 self._on_session_changed(self._model.current_session)
 
+    def _on_plan_action(self, action: str):
+        """Maneja las acciones interactivas de confirmación o cancelación de planes (PLAN 3)."""
+        if action == "execute":
+            res = self._agent_manager.execute_pending_code()
+            if res.get("success"):
+                msg = "✓ Código OpenUSD ejecutado exitosamente en el Stage."
+                self._chat_window.add_message_bubble("assistant", msg)
+                self._chat_window.finalize_last_assistant_message(msg)
+            else:
+                err = res.get("error_msg", "Error desconocido")
+                msg = f"⚠️ Error al ejecutar en Stage: {err}"
+                self._chat_window.add_message_bubble("assistant", msg)
+                self._chat_window.finalize_last_assistant_message(msg)
+        elif action == "cancel":
+            self._agent_manager.cancel_pending_code()
+            msg = "✕ Ejecución cancelada por el usuario. Escena OpenUSD intacta."
+            self._chat_window.add_message_bubble("assistant", msg)
+            self._chat_window.finalize_last_assistant_message(msg)
+
     def _on_model_updated(self):
-        """Synchronizes AgentManager provider and model whenever ChatModel changes."""
+        """Synchronizes AgentManager provider, model, execution mode and turbo mode whenever ChatModel changes."""
         if self._agent_manager and self._model:
+            if hasattr(self._model, "execution_mode"):
+                self._agent_manager.set_execution_mode(self._model.execution_mode)
+            if hasattr(self._model, "turbo_mode"):
+                self._agent_manager.set_turbo_mode(self._model.turbo_mode)
+
             prov = self._model.current_provider
             mod = self._model.current_model
             if prov:
@@ -143,6 +168,8 @@ class LMChatExtension(omni.ext.IExt):
                 prompt,
                 append_callback=self._chat_window.append_to_last_message,
                 ui_feedback_callback=self._chat_window.add_message_bubble,
+                reasoning_callback=self._chat_window.append_reasoning,
+                confirmation_callback=lambda code, meta: self._chat_window.show_plan_confirmation_card(code, meta.get("plan", "")),
             )
 
             # If final response is an unformatted error message not caught by streaming

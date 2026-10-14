@@ -8,6 +8,7 @@ Implementa la interfaz IChatView aplicando la arquitectura desacoplada Model-Del
 
 import asyncio
 import re
+import time
 from typing import Callable, Any, Optional, List, Dict, Tuple
 import omni.ui as ui
 import omni.appwindow
@@ -35,6 +36,7 @@ class ChatDelegate:
         self._model = model
         self._submit_callback = submit_callback
         self._session_changed_callback: Optional[Callable[[ChatSession], Any]] = None
+        self._plan_action_callback: Optional[Callable[[str], Any]] = None
 
     def set_submit_callback(self, callback: Callable[[str], Any]) -> None:
         """Establece el callback de envío.
@@ -51,6 +53,35 @@ class ChatDelegate:
             callback (Callable[[ChatSession], Any]): Función a invocar con la sesión activa.
         """
         self._session_changed_callback = callback
+
+    def set_plan_action_callback(self, callback: Callable[[str], Any]) -> None:
+        """Establece el callback para acciones de planes interactivos ('execute' o 'cancel')."""
+        self._plan_action_callback = callback
+
+    def on_execute_plan(self) -> None:
+        """Dispara la ejecución del plan confirmado por el usuario."""
+        if hasattr(self, "_plan_action_callback") and self._plan_action_callback:
+            try:
+                self._plan_action_callback("execute")
+            except Exception as e:
+                print(f"[ChatDelegate] Error ejecutando plan confirmado: {e}")
+
+    def on_cancel_plan(self) -> None:
+        """Descarta la propuesta del plan."""
+        if hasattr(self, "_plan_action_callback") and self._plan_action_callback:
+            try:
+                self._plan_action_callback("cancel")
+            except Exception as e:
+                print(f"[ChatDelegate] Error cancelando plan: {e}")
+
+    def on_execution_mode_changed(self, mode: str) -> None:
+        """Maneja el cambio de modo de ejecución ('immediate' o 'plan_and_confirm')."""
+        self._model.set_execution_mode(mode)
+
+    def on_turbo_mode_changed(self, enabled: bool) -> None:
+        """Maneja el cambio de modo turbo."""
+        self._model.set_turbo_mode(enabled)
+
 
     def on_submit(self, text: str) -> None:
         """Interpreta el evento de envío desde la vista.
@@ -180,6 +211,8 @@ class ChatWindow(IChatView):
         self._message_labels: List[ui.Label] = []
         self._last_assistant_bubble_components: Optional[Dict[str, Any]] = None
         self._settings_window: Optional[Any] = None
+        self._active_reasoning_frame: Optional[Any] = None
+        self._active_reasoning_label: Optional[Any] = None
 
         # Configuración de la ventana anclable nativa omni.ui
         dock_pref = getattr(ui.DockPreference, "RIGHT_BOTTOM", 0)
@@ -206,6 +239,8 @@ class ChatWindow(IChatView):
     def rebuild_messages_ui(self) -> None:
         """Reconstruye las burbujas visuales en el scroll frame según los mensajes del modelo."""
         self._message_labels.clear()
+        self._active_reasoning_frame = None
+        self._active_reasoning_label = None
         if hasattr(self, "_messages_stack") and self._messages_stack:
             try:
                 self._messages_stack.clear()
@@ -217,6 +252,7 @@ class ChatWindow(IChatView):
 
     def finalize_last_assistant_message(self, full_text: Optional[str] = None) -> None:
         """Sincroniza y persiste el mensaje final del asistente en el modelo y almacenamiento local."""
+        self._collapse_reasoning_frame()
         if full_text is None and self._message_labels:
             last_label = self._message_labels[-1]
             if hasattr(last_label, "text"):
@@ -300,26 +336,46 @@ class ChatWindow(IChatView):
                 self._build_input_area()
 
     def _build_header(self) -> None:
-        """Renderiza el encabezado con selectores de Proveedor, Modelo, Botón de Settings y Badge de Estado."""
-        with ui.HStack(height=45, style={"background_color": 0xFF2A2A2A}, padding=8, spacing=8):
+        """Renderiza el encabezado con selectores de Proveedor, Modelo, Modo, Turbo, Botón de Settings y Badge de Estado."""
+        with ui.HStack(height=45, style={"background_color": 0xFF2A2A2A}, padding=8, spacing=6):
             # Selector de Proveedor
-            ui.Label("Proveedor:", width=68, style={"color": 0xFFCCCCCC, "font_size": 13})
-            self._provider_combo_frame = ui.Frame(width=130, height=26)
+            ui.Label("Proveedor:", width=58, style={"color": 0xFFCCCCCC, "font_size": 12})
+            self._provider_combo_frame = ui.Frame(width=105, height=26)
             self._rebuild_provider_combo()
 
-            ui.Spacer(width=6)
+            ui.Spacer(width=4)
 
             # Selector de Modelo (dinámico)
-            ui.Label("Modelo:", width=52, style={"color": 0xFFCCCCCC, "font_size": 13})
-            self._model_combo_frame = ui.Frame(width=180, height=26)
+            ui.Label("Modelo:", width=46, style={"color": 0xFFCCCCCC, "font_size": 12})
+            self._model_combo_frame = ui.Frame(width=135, height=26)
             self._rebuild_model_combo()
 
-            ui.Spacer(width=6)
+            ui.Spacer(width=4)
+
+            # Selector de Modo de Ejecución: Inmediato vs Plan & Confirmar
+            ui.Label("Modo:", width=38, style={"color": 0xFFCCCCCC, "font_size": 12})
+            self._mode_combo_frame = ui.Frame(width=115, height=26)
+            self._rebuild_mode_combo()
+
+            ui.Spacer(width=4)
+
+            # Botón Turbo Mode
+            turbo_active = getattr(self._model, "turbo_mode", False)
+            turbo_bg = 0xFFD08770 if turbo_active else 0xFF383838
+            self._turbo_button = ui.Button(
+                "⚡ Turbo" if turbo_active else "⚡ Normal",
+                width=68,
+                height=26,
+                style={"background_color": turbo_bg, "border_radius": 4, "font_size": 11},
+                clicked_fn=self._handle_turbo_toggle,
+            )
+
+            ui.Spacer(width=4)
 
             # Botón de Configuración / Settings
             self._settings_button = ui.Button(
                 "⚙ Settings",
-                width=85,
+                width=75,
                 height=26,
                 style={"background_color": 0xFF383838, "border_radius": 4, "font_size": 11},
                 clicked_fn=self._open_settings_dialog,
@@ -329,15 +385,15 @@ class ChatWindow(IChatView):
 
             # Dynamic Status Badge
             with ui.HStack(width=0, spacing=4):
-                ui.Label("Estado:", width=50, style={"color": 0xFFAAAAAA, "font_size": 12})
-                with ui.ZStack(width=130, height=24):
+                ui.Label("Estado:", width=45, style={"color": 0xFFAAAAAA, "font_size": 12})
+                with ui.ZStack(width=120, height=24):
                     self._status_badge_bg = ui.Rectangle(
                         style={"background_color": 0xFF2E7D32, "border_radius": 12}
                     )
                     self._status_badge_label = ui.Label(
                         self._model.status,
                         alignment=ui.Alignment.CENTER,
-                        style={"color": 0xFFFFFFFF, "font_size": 12, "font_weight": "bold"}
+                        style={"color": 0xFFFFFFFF, "font_size": 11, "font_weight": "bold"}
                     )
 
     def _rebuild_provider_combo(self) -> None:
@@ -396,10 +452,55 @@ class ChatWindow(IChatView):
         try:
             self._model_combo_frame.clear()
             with self._model_combo_frame:
-                self._model_combo = ui.ComboBox(active_idx, *models, width=180, height=26)
+                self._model_combo = ui.ComboBox(active_idx, *models, width=135, height=26)
                 self._model_combo.model.add_item_changed_fn(self._on_model_selection_changed)
         finally:
             self._is_updating_model_combo = False
+
+    def _rebuild_mode_combo(self) -> None:
+        """Reconstruye el selector de modo de ejecución (Inmediato vs Plan & Confirmar)."""
+        if not hasattr(self, "_mode_combo_frame") or not self._mode_combo_frame:
+            return
+
+        modes_display = ["⚡ Inmediato", "📝 Planificar"]
+        current_mode = getattr(self._model, "execution_mode", "immediate")
+        active_idx = 1 if "plan" in current_mode.lower() else 0
+
+        self._is_updating_mode_combo = True
+        try:
+            self._mode_combo_frame.clear()
+            with self._mode_combo_frame:
+                self._mode_combo = ui.ComboBox(active_idx, *modes_display, width=115, height=26)
+                self._mode_combo.model.add_item_changed_fn(self._on_mode_selection_changed)
+        finally:
+            self._is_updating_mode_combo = False
+
+    def _on_mode_selection_changed(self, item_model, item) -> None:
+        """Maneja el cambio en el selector desplegable de modo de ejecución."""
+        if getattr(self, "_is_updating_mode_combo", False):
+            return
+        try:
+            val_idx = item_model.get_item_value_model().as_int
+            selected_mode = "plan_and_confirm" if val_idx == 1 else "immediate"
+            if selected_mode != getattr(self._model, "execution_mode", "immediate"):
+                self._delegate.on_execution_mode_changed(selected_mode)
+        except Exception as e:
+            print(f"[ChatWindow] Error en on_mode_selection_changed: {e}")
+
+    def _handle_turbo_toggle(self) -> None:
+        """Alterna el modo Turbo (token micro-batching / stream chunk batching)."""
+        current = getattr(self._model, "turbo_mode", False)
+        new_val = not current
+        self._delegate.on_turbo_mode_changed(new_val)
+        self._update_turbo_button_ui()
+
+    def _update_turbo_button_ui(self) -> None:
+        """Actualiza la apariencia del botón Turbo según el estado actual."""
+        if hasattr(self, "_turbo_button") and self._turbo_button:
+            turbo_active = getattr(self._model, "turbo_mode", False)
+            turbo_bg = 0xFFD08770 if turbo_active else 0xFF383838
+            self._turbo_button.text = "⚡ Turbo" if turbo_active else "⚡ Normal"
+            self._turbo_button.style = {"background_color": turbo_bg, "border_radius": 4, "font_size": 11}
 
 
     def _build_session_bar(self) -> None:
@@ -570,6 +671,8 @@ class ChatWindow(IChatView):
         self._rebuild_session_combo()
         self._rebuild_provider_combo()
         self._rebuild_model_combo()
+        self._rebuild_mode_combo()
+        self._update_turbo_button_ui()
 
     def _update_status_badge_ui(self, status: str, is_loading: bool) -> None:
         """Actualiza los estilos visuales del badge de estado en el hilo principal."""
@@ -631,6 +734,10 @@ class ChatWindow(IChatView):
             text (str): Texto inicial de la burbuja.
         """
         is_user = (role == "user")
+        if is_user:
+            self._active_reasoning_frame = None
+            self._active_reasoning_label = None
+
         is_diagnostic = ("Diagnóstico LM-Chat" in text or "Diagnóstico de Conexión" in text or text.strip().startswith("### ⚠️ Diagnóstico"))
 
         if is_user:
@@ -799,6 +906,25 @@ class ChatWindow(IChatView):
         Args:
             chunk (str): Fragmento de texto recibido del flujo asíncrono.
         """
+    def _collapse_reasoning_frame(self) -> None:
+        """Colapsa el frame de razonamiento y actualiza su título a completado (Plan 01)."""
+        if self._active_reasoning_frame and not getattr(self._active_reasoning_frame, "collapsed", False):
+            try:
+                self._active_reasoning_frame.collapsed = True
+                if hasattr(self._active_reasoning_frame, "title"):
+                    self._active_reasoning_frame.title = "🧠 Pensamiento analítico completado [Desplegar]"
+            except Exception:
+                pass
+
+    def append_to_last_message(self, chunk: str) -> None:
+        """Agrega texto progresivamente a la última burbuja del asistente (Streaming).
+
+        Args:
+            chunk (str): Fragmento de texto recibido del flujo asíncrono.
+        """
+        # Colapsar automáticamente el panel de razonamiento cuando comienzan a llegar tokens de respuesta final
+        self._collapse_reasoning_frame()
+
         if self._message_labels:
             last_label = self._message_labels[-1]
             if hasattr(last_label, "text"):
@@ -807,6 +933,119 @@ class ChatWindow(IChatView):
                 if ("Diagnóstico LM-Chat" in current_text or "Diagnóstico de Conexión" in current_text or current_text.strip().startswith("### ⚠️ Diagnóstico")):
                     self._upgrade_last_bubble_to_diagnostic()
             self._scroll_to_bottom()
+
+    def append_reasoning(self, chunk: str) -> None:
+        """Muestra y acumula tokens de razonamiento en un CollapsibleFrame dedicado (PLAN 1).
+
+        Args:
+            chunk (str): Fragmento de texto del proceso de pensamiento.
+        """
+        if not chunk:
+            return
+
+        if self._active_reasoning_frame is None or self._active_reasoning_label is None:
+            self._reasoning_start_time = time.monotonic()
+            with self._messages_stack:
+                with ui.HStack(height=0):
+                    with ui.VStack(width=ui.Fraction(4)):
+                        self._active_reasoning_frame = ui.CollapsibleFrame(
+                            "🧠 Pensando...",
+                            collapsed=False,
+                            style={
+                                "background_color": 0xFF202225,
+                                "border_radius": 6,
+                                "border_color": 0xFF2E7D32,
+                                "border_width": 1,
+                            }
+                        )
+                        with self._active_reasoning_frame:
+                            with ui.VStack(padding=8, spacing=4):
+                                self._active_reasoning_label = ui.Label(
+                                    "",
+                                    word_wrap=True,
+                                    style={"color": 0xFFA0AEC0, "font_size": 12, "font_family": "monospace"}
+                                )
+                    ui.Spacer(width=ui.Fraction(1))
+
+        if self._active_reasoning_label and hasattr(self._active_reasoning_label, "text"):
+            self._active_reasoning_label.text += chunk
+            if hasattr(self, "_reasoning_start_time") and hasattr(self._active_reasoning_frame, "title"):
+                elapsed = int(time.monotonic() - self._reasoning_start_time)
+                if elapsed > 0:
+                    self._active_reasoning_frame.title = f"🧠 Pensando... ({elapsed}s)"
+            self._scroll_to_bottom()
+
+    def show_plan_confirmation_card(self, code: str, plan_text: str = "") -> None:
+        """Renderiza una tarjeta interactiva de confirmación de plan para el usuario (PLAN 3).
+
+        Args:
+            code (str): Código Python/OpenUSD propuesto pendiente de ejecución.
+            plan_text (str): Descripción o pasos del plan propuesto.
+        """
+        margin_fraction = ui.Fraction(1)
+        bubble_fraction = ui.Fraction(4)
+
+        with self._messages_stack:
+            with ui.HStack(height=0):
+                with ui.VStack(width=bubble_fraction):
+                    with ui.ZStack(width=0):
+                        ui.Rectangle(style={"background_color": 0xFF2A2F3A, "border_radius": 8})
+                        with ui.VStack(padding=12, spacing=8):
+                            # Título de la tarjeta
+                            ui.Label(
+                                "📝 PROPUESTA DE PLAN DE EJECUCIÓN (PLAN & CONFIRM)",
+                                style={"color": 0xFFEBCB8B, "font_size": 12, "font_weight": "bold"}
+                            )
+                            if plan_text:
+                                ui.Label(
+                                    plan_text,
+                                    word_wrap=True,
+                                    style={"color": 0xFFE5E9F0, "font_size": 13}
+                                )
+
+                            # Bloque de código propuesto
+                            with ui.ZStack(width=0):
+                                ui.Rectangle(style={"background_color": 0xFF141414, "border_radius": 6})
+                                with ui.VStack(padding=8, spacing=4):
+                                    ui.Label(
+                                        code,
+                                        word_wrap=True,
+                                        style={"color": 0xFFD8DEE9, "font_size": 12, "font_family": "monospace"}
+                                    )
+
+                            # Botones de Acción interactivos
+                            with ui.HStack(height=30, spacing=8):
+                                exec_btn = ui.Button(
+                                    "✓ Ejecutar en Stage",
+                                    height=28,
+                                    width=140,
+                                    style={"background_color": 0xFF2E7D32, "border_radius": 4, "font_size": 12, "font_weight": "bold"}
+                                )
+                                cancel_btn = ui.Button(
+                                    "✕ Cancelar",
+                                    height=28,
+                                    width=100,
+                                    style={"background_color": 0xFF883333, "border_radius": 4, "font_size": 12}
+                                )
+
+                                def _on_confirm():
+                                    exec_btn.enabled = False
+                                    cancel_btn.enabled = False
+                                    exec_btn.text = "✓ Ejecutando..."
+                                    self._delegate.on_execute_plan()
+
+                                def _on_cancel():
+                                    exec_btn.enabled = False
+                                    cancel_btn.enabled = False
+                                    cancel_btn.text = "✕ Cancelado"
+                                    self._delegate.on_cancel_plan()
+
+                                exec_btn.set_clicked_fn(_on_confirm)
+                                cancel_btn.set_clicked_fn(_on_cancel)
+
+                ui.Spacer(width=margin_fraction)
+
+        self._scroll_to_bottom()
 
     def set_button_state(self, processing: bool) -> None:
         """Alterna el estado del botón enviar.
