@@ -70,6 +70,12 @@ y este proyecto se adhiere a [Semantic Versioning (SemVer 2.0.0)](https://semver
 - Corrección de la aplicación de masa dinámica en PhysX (`UsdPhysics.MassAPI`).
 - Mocks aislados de Omniverse para ejecución multiplataforma sin depender del entorno 3D abierto.
 
+## v1.2.1 (2026-10-14)
+
+### Fix
+
+- **citation**: remove institutional affiliation to reflect personal project (#120)
+
 ## v1.2.0 (2026-10-14)
 
 ### Feat

@@ -1,7 +1,7 @@
 [package]
 title = "LM-Chat: AI Agent & MCP Integration"
 description = "Autonomous Spatial AI Copilot for NVIDIA Omniverse with MCP, reasoning models, and cluster support."
-version = "1.2.0"
+version = "1.2.1"
 category = "AI"
 keywords = ["ai", "llm", "mcp", "chat", "usd", "omniverse", "agent"]
 changelog = "docs/CHANGELOG.md"
