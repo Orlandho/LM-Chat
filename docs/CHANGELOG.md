@@ -6,6 +6,11 @@ y este proyecto se adhiere a [Semantic Versioning (SemVer 2.0.0)](https://semver
 
 ---
 
+## [1.1.0] - 2026-10-14
+
+### Cambios
+- Nueva versión comercial v1.1.0 sincronizada automáticamente para NVIDIA Omniverse Kit.
+
 ## [1.0.0] - 2026-09-14
 
 ### Añadido (Features)

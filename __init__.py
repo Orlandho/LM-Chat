@@ -5,7 +5,7 @@
 LM-Chat™: Autonomous Spatial AI Assistant & Neural Copilot for NVIDIA Omniverse.
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 try:
     from .extension import *
