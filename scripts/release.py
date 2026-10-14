@@ -14,16 +14,20 @@ import subprocess
 import io
 from typing import Tuple, Dict, List
 
-if sys.platform == "win32":
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+def _configure_terminal_encoding():
+    if sys.platform == "win32":
+        try:
+            sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+            sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+        except Exception:
+            pass
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 # Versioned target files and their regex patterns
 VERSIONED_TARGETS = {
     "extension_toml": {
-        "path": os.path.join(REPO_ROOT, "config", "extension.toml"),
+        "path": os.path.join(REPO_ROOT, "exts", "orlandodorival.lm_chat", "config", "extension.toml"),
         "pattern": r'(^version\s*=\s*")([^"]+)(")',
         "replace": r'\g<1>{new_version}\g<3>',
     },
@@ -33,7 +37,12 @@ VERSIONED_TARGETS = {
         "replace": r'\g<1>{new_version}\g<3>',
     },
     "init_py": {
-        "path": os.path.join(REPO_ROOT, "__init__.py"),
+        "path": os.path.join(REPO_ROOT, "exts", "orlandodorival.lm_chat", "__init__.py"),
+        "pattern": r'(^__version__\s*=\s*")([^"]+)(")',
+        "replace": r'\g<1>{new_version}\g<3>',
+    },
+    "pkg_init_py": {
+        "path": os.path.join(REPO_ROOT, "exts", "orlandodorival.lm_chat", "orlandodorival", "lm_chat", "__init__.py"),
         "pattern": r'(^__version__\s*=\s*")([^"]+)(")',
         "replace": r'\g<1>{new_version}\g<3>',
     },
@@ -168,9 +177,10 @@ def run_git_operations(new_version: str, create_tag: bool = True) -> None:
     commit_msg = f"chore(release): bump version to {new_version}"
 
     files_to_stage = [
-        "config/extension.toml",
+        "exts/orlandodorival.lm_chat/config/extension.toml",
         "pyproject.toml",
-        "__init__.py",
+        "exts/orlandodorival.lm_chat/__init__.py",
+        "exts/orlandodorival.lm_chat/orlandodorival/lm_chat/__init__.py",
         "CITATION.cff",
         "docs/CHANGELOG.md"
     ]
@@ -209,6 +219,7 @@ def main() -> None:
     )
 
     args = parser.parse_args()
+    _configure_terminal_encoding()
 
     print("=" * 65)
     print("  LM-Chat™ Automated Versioning & Release Manager")

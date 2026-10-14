@@ -13,6 +13,8 @@ Turbo Mode, and MCP tools integration.
 """
 
 import asyncio
+import json
+import time
 import re
 from typing import Optional, Callable, Dict, Any, List
 
@@ -232,6 +234,40 @@ class AgentManager:
         self._messages.append({"role": "user", "content": prompt})
         logger.info(f"Procesando prompt de usuario: '{prompt[:60]}...'")
 
+        # Descubrir herramientas MCP activas para exponerlas al LLM / LM Studio
+        tools_payload = None
+        integrations_payload = None
+        raw_tools: List[Dict[str, Any]] = []
+        if self._mcp_registry:
+            try:
+                raw_tools = await self._mcp_registry.list_available_tools()
+                if raw_tools:
+                    tools_payload = []
+                    for t in raw_tools:
+                        if "function" in t:
+                            tools_payload.append({"type": "function", "function": t["function"]})
+                        elif "input_schema" in t or "parameters" in t:
+                            tools_payload.append({
+                                "type": "function",
+                                "function": {
+                                    "name": t.get("name", ""),
+                                    "description": t.get("description", ""),
+                                    "parameters": t.get("input_schema") or t.get("parameters", {}),
+                                },
+                            })
+                        else:
+                            tools_payload.append(t)
+
+                    # Integrations nativas para LM Studio v1 REST API
+                    if self._router.provider in ("lm_studio", "lmstudio"):
+                        server_names = list({t.get("server", "default") for t in raw_tools if t.get("server")})
+                        integrations_payload = [
+                            {"type": "plugin", "id": f"mcp/{s_name}"}
+                            for s_name in server_names
+                        ]
+            except Exception as e:
+                logger.warning(f"Error listando herramientas MCP para AgentManager: {e}")
+
         max_retries = 2
 
         for attempt in range(max_retries + 1):
@@ -240,11 +276,20 @@ class AgentManager:
                 full_reasoning = ""
                 error_occurred = False
                 error_message = ""
+                accumulated_tool_calls: Dict[int, Dict[str, Any]] = {}
 
-                # Stream response via InferenceRouter with Turbo Mode support
+                stream_kwargs: Dict[str, Any] = {
+                    "turbo_mode": self._turbo_mode,
+                }
+                if tools_payload:
+                    stream_kwargs["tools"] = tools_payload
+                if integrations_payload:
+                    stream_kwargs["integrations"] = integrations_payload
+
+                # Stream response via InferenceRouter with Turbo Mode and MCP tools support
                 async for chunk_obj in self._router.stream_chat_completions(
                     self._messages,
-                    turbo_mode=self._turbo_mode,
+                    **stream_kwargs,
                 ):
                     if chunk_obj.get("success"):
                         data = chunk_obj.get("data", {})
@@ -253,6 +298,29 @@ class AgentManager:
                             delta = choices[0].get("delta", {})
                             content_chunk = delta.get("content", "")
                             reasoning_chunk = delta.get("reasoning_content", "")
+                            delta_tool_calls = delta.get("tool_calls", [])
+
+                            # Acumular tool_calls en streaming
+                            if delta_tool_calls:
+                                for tc in delta_tool_calls:
+                                    tc_idx = tc.get("index", 0)
+                                    if tc_idx not in accumulated_tool_calls:
+                                        accumulated_tool_calls[tc_idx] = {
+                                            "id": tc.get("id", f"call_{tc_idx}_{int(time.time())}"),
+                                            "type": tc.get("type", "function"),
+                                            "function": {
+                                                "name": tc.get("function", {}).get("name", ""),
+                                                "arguments": tc.get("function", {}).get("arguments", ""),
+                                            },
+                                        }
+                                    else:
+                                        if tc.get("id"):
+                                            accumulated_tool_calls[tc_idx]["id"] = tc["id"]
+                                        fn = tc.get("function", {})
+                                        if fn.get("name"):
+                                            accumulated_tool_calls[tc_idx]["function"]["name"] += fn["name"]
+                                        if fn.get("arguments"):
+                                            accumulated_tool_calls[tc_idx]["function"]["arguments"] += fn["arguments"]
 
                             # Enviar tokens de razonamiento al widget de pensamiento
                             if reasoning_chunk:
@@ -295,6 +363,53 @@ class AgentManager:
 
                 # Wait briefly for UI refresh
                 await asyncio.sleep(0.1)
+
+                # Si el LLM emitió tool_calls, ejecutarlas vía MCP Client Registry y continuar ciclo ReAct
+                if accumulated_tool_calls and self._mcp_registry:
+                    tool_calls_list = list(accumulated_tool_calls.values())
+                    logger.info(f"AgentManager: Procesando {len(tool_calls_list)} tool_calls del LLM...")
+
+                    self._messages.append({
+                        "role": "assistant",
+                        "content": full_content or "",
+                        "tool_calls": tool_calls_list,
+                    })
+
+                    for tc in tool_calls_list:
+                        fn = tc.get("function", {})
+                        tool_name = fn.get("name", "")
+                        tool_args_raw = fn.get("arguments", "")
+                        try:
+                            parsed_args = json.loads(tool_args_raw) if tool_args_raw else {}
+                        except Exception:
+                            parsed_args = {}
+
+                        server_name = next(
+                            (t.get("server", "default") for t in raw_tools if t.get("name") == tool_name),
+                            "default",
+                        )
+
+                        tool_notify = f"\n\n[Invocando herramienta MCP '{tool_name}' ({server_name})...]"
+                        if append_callback:
+                            append_callback(tool_notify)
+
+                        tool_res = await self._mcp_registry.call_tool(server_name, tool_name, parsed_args)
+
+                        tool_res_str = json.dumps(tool_res)
+                        self._messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc.get("id"),
+                            "name": tool_name,
+                            "content": tool_res_str,
+                        })
+
+                        done_notify = f"\n[Herramienta MCP '{tool_name}' completada]"
+                        if append_callback:
+                            append_callback(done_notify)
+
+                    # ReAct: Continuar al siguiente turno para que el LLM sintetice la respuesta final con el resultado de la herramienta
+                    await asyncio.sleep(0.1)
+                    continue
 
                 # Check for python code to execute using pre-compiled regex
                 # Strip reasoning thinking tags (<think>...</think>) from DeepSeek-R1 to avoid executing draft code

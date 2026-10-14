@@ -9,6 +9,11 @@ y este proyecto se adhiere a [Semantic Versioning (SemVer 2.0.0)](https://semver
 ## [1.1.0] - 2026-10-14
 
 ### Añadido (Features)
+- **Estandarización Omniverse Kit Layout & Registro Comunitario:**
+  - Migración al layout estándar `exts/orlandodorival.lm_chat/` para cumplimiento estricto con NVIDIA Community Registry.
+  - Actualización del namespace técnico a `orlandodorival.lm_chat` evitando colisiones con prefijos reservados de NVIDIA.
+  - Incorporación de recursos visuales oficiales `data/icon.png` (256x256) y `data/preview.png` (800x450).
+  - Configuración multicanal de instalación en Omniverse Extension Manager (Git URL, Community Registry con topic `omniverse-kit-extension`, Release ZIP).
 - **Soporte Nativo para Modelos de Razonamiento (Reasoning Models):**
   - Detección automática mediante regex de modelos tipo o1, o3, DeepSeek R1 y Claude Thinking (`is_reasoning_model`).
   - Adaptación transparente de payload (omisión de `temperature` y mapeo a `max_completion_tokens`).

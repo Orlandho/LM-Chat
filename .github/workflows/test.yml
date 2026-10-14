@@ -1,4 +1,4 @@
-name: Jules CI - Autonomous Agentic Test Suite
+name: LM-Chat Test Suite - Omniverse Mocks & Unit Tests
 
 on:
   push:

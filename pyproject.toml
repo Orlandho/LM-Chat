@@ -9,8 +9,7 @@ authors = [
     { name = "Orlando Dorival" }
 ]
 keywords = [
-    "nvidia", "omniverse", "openusd", "ai", "spatial-ai",
-    "lm-studio", "gemini", "ollama", "mcp", "copilot"
+    "ai", "llm", "mcp", "chat", "usd", "omniverse", "agent"
 ]
 
 [tool.commitizen]
@@ -21,8 +20,9 @@ version_provider = "pep621"
 update_changelog_on_bump = true
 changelog_file = "docs/CHANGELOG.md"
 version_files = [
-    "config/extension.toml:^version = \"(?P<current>.*)\"",
-    "__init__.py:^__version__ = \"(?P<current>.*)\"",
+    "exts/orlandodorival.lm_chat/config/extension.toml:^version = \"(?P<current>.*)\"",
+    "exts/orlandodorival.lm_chat/__init__.py:^__version__ = \"(?P<current>.*)\"",
+    "exts/orlandodorival.lm_chat/orlandodorival/lm_chat/__init__.py:^__version__ = \"(?P<current>.*)\"",
     "CITATION.cff:^version: (?P<current>.*)"
 ]
 
@@ -31,3 +31,4 @@ minversion = "7.0"
 testpaths = ["tests"]
 asyncio_mode = "auto"
 python_files = ["test_*.py"]
+pythonpath = ["exts/orlandodorival.lm_chat", "."]

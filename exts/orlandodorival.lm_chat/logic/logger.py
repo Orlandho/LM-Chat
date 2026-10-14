@@ -74,7 +74,7 @@ class LMChatLogger:
             log_to_file (bool): Si es True, escribe logs en el archivo persistente.
         """
         self._buffer: deque = deque(maxlen=buffer_size)
-        self._python_logger = logging.getLogger("omni.lm_chat")
+        self._python_logger = logging.getLogger("orlandodorival.lm_chat")
         self._log_to_file = log_to_file
         self._file_handler: Optional[logging.Handler] = None
 

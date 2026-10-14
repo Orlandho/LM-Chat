@@ -9,6 +9,7 @@ on:
       - 'docs/**'
       - '.jules/**'
       - '.gitignore'
+      - '.github/workflows/test.yml'
       - '.github/workflows/jules-ci.yml'
 
 concurrency:
@@ -65,11 +66,16 @@ jobs:
       - name: Package Omniverse Extension Archive
         if: env.NO_BUMP != 'true'
         run: |
-          # Package according to strict Omniverse Kit standards (folder name: omni.lm_chat)
-          mkdir -p package_staging/omni.lm_chat
-          cp -r config extension.py logic ui core mcp cli README.md LICENSE package_staging/omni.lm_chat/
+          # Package according to strict Omniverse Kit standards (folder name: orlandodorival.lm_chat)
+          mkdir -p package_staging/orlandodorival.lm_chat
+          cp -r exts/orlandodorival.lm_chat/* package_staging/orlandodorival.lm_chat/
+          cp README.md LICENSE package_staging/orlandodorival.lm_chat/
+          mkdir -p package_staging/orlandodorival.lm_chat/docs
+          cp docs/CHANGELOG.md package_staging/orlandodorival.lm_chat/docs/
+          # Ensure compiled cache directories are not included in release archive
+          find package_staging -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
           cd package_staging
-          zip -r ../omni.lm_chat-${{ steps.cz.outputs.TAG }}.zip omni.lm_chat
+          zip -r ../orlandodorival.lm_chat-${{ steps.cz.outputs.TAG }}.zip orlandodorival.lm_chat
           cd ..
           rm -rf package_staging
 
@@ -83,6 +89,6 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            omni.lm_chat-${{ steps.cz.outputs.TAG }}.zip
+            orlandodorival.lm_chat-${{ steps.cz.outputs.TAG }}.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

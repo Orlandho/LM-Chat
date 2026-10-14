@@ -181,6 +181,33 @@ class SettingsManager(ISettingsManager):
                 {"label": "Google Gemini OpenAI-Compat", "url": "https://generativelanguage.googleapis.com/v1beta/openai"},
             ],
         },
+        "Local Cluster": {
+            "name": "Local Cluster",
+            "provider_key": "cluster",
+            "base_url": "http://localhost:1234/v1",
+            "default_model": "deepseek-v4",
+            "available_models": [
+                "deepseek-v4",
+                "deepseek-r1-distill-qwen-14b",
+                "deepseek-r1-distill-qwen-32b",
+                "llama-3.3-70b-instruct",
+                "qwen2.5-coder-7b",
+            ],
+            "api_key": "",
+            "env_key": None,
+            "temperature": 0.7,
+            "timeout": 600.0,
+            "max_tokens": 4096,
+            "presets": [
+                {"label": "Local + LAN Failover", "url": "http://localhost:1234/v1"},
+                {"label": "Distributed DGX Cluster (:8000)", "url": "http://localhost:8000/v1"},
+            ],
+            "cluster_strategy": "priority",
+            "cluster_nodes": [
+                {"name": "Primary Local Node", "url": "http://localhost:1234/v1", "is_active": True},
+                {"name": "Secondary LAN Node", "url": "http://192.168.1.100:1234/v1", "is_active": True},
+            ],
+        },
     }
 
 
@@ -206,6 +233,10 @@ class SettingsManager(ISettingsManager):
         "google gemini": "Google Gemini API",
         "google_gemini": "Google Gemini API",
         "google gemini api": "Google Gemini API",
+        "cluster": "Local Cluster",
+        "clusters": "Local Cluster",
+        "local cluster": "Local Cluster",
+        "local_cluster": "Local Cluster",
         "muse": "LM Studio",
         "vllm": "LM Studio",
         "cloud": "OpenAI API",
@@ -790,5 +821,25 @@ class SettingsManager(ISettingsManager):
         if found:
             return self.save()
         return False
+
+    def get_cluster_manager(self) -> Any:
+        """Instancia y retorna un ClusterManager configurado con los nodos y estrategia del cluster."""
+        from logic.cluster_manager import ClusterManager
+        p_cfg = self.get_provider_config("Local Cluster")
+        return ClusterManager.from_dict({
+            "strategy": p_cfg.get("cluster_strategy", "priority"),
+            "nodes": p_cfg.get("cluster_nodes", []),
+            "health_check_timeout": 3.0,
+        })
+
+    def get_lm_studio_vram_manager(self) -> Any:
+        """Instancia y retorna un LMStudioVRAMManager para gestión de memoria GPU."""
+        from logic.lm_studio_vram import LMStudioVRAMManager
+        p_cfg = self.get_provider_config("LM Studio")
+        return LMStudioVRAMManager(
+            base_url=p_cfg.get("base_url", "http://localhost:1234"),
+            api_key=self.get_effective_api_key("LM Studio"),
+        )
+
 
 

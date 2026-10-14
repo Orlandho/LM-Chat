@@ -185,6 +185,7 @@ class InferenceRouter:
         "google": "https://generativelanguage.googleapis.com/v1beta/openai",
         "google gemini": "https://generativelanguage.googleapis.com/v1beta/openai",
         "google gemini api": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "cluster": "http://localhost:1234/v1",
     }
 
     DEFAULT_MODELS: Dict[str, str] = {
@@ -207,6 +208,7 @@ class InferenceRouter:
         "google": "gemini-2.0-flash",
         "google gemini": "gemini-2.0-flash",
         "google gemini api": "gemini-2.0-flash",
+        "cluster": "deepseek-v4",
     }
 
     CANONICAL_PROVIDERS: Dict[str, str] = {
@@ -234,6 +236,10 @@ class InferenceRouter:
         "google_gemini": "gemini",
         "google gemini api": "gemini",
         "gemini api": "gemini",
+        "cluster": "cluster",
+        "clusters": "cluster",
+        "local_cluster": "cluster",
+        "local cluster": "cluster",
     }
 
     @classmethod
@@ -256,19 +262,31 @@ class InferenceRouter:
         api_key: Optional[str] = None,
         model: Optional[str] = None,
         timeout: float = 600.0,
+        cluster_manager: Optional[Any] = None,
     ) -> None:
         """
         Initializes the InferenceRouter with specified provider configuration.
 
         Args:
-            provider (str): Provider identifier ('lm_studio', 'ollama', 'vllm', 'cloud', 'openai', 'claude', 'gemini').
+            provider (str): Provider identifier ('lm_studio', 'ollama', 'vllm', 'cloud', 'openai', 'claude', 'gemini', 'cluster').
             base_url (Optional[str]): Custom base URL override.
             api_key (Optional[str]): API key for authentication (optional for local).
             model (Optional[str]): Model name override.
             timeout (float): Request timeout in seconds (default: 600s).
+            cluster_manager (Optional[Any]): Gestor de cluster multi-nodo con conmutación por error.
         """
         self._timeout = timeout
+        self._cluster_manager = cluster_manager
         self.set_provider(provider=provider, base_url=base_url, model=model, api_key=api_key)
+
+    @property
+    def cluster_manager(self) -> Optional[Any]:
+        """Gestor de cluster multi-nodo activo."""
+        return self._cluster_manager
+
+    def set_cluster_manager(self, cluster_manager: Optional[Any]) -> None:
+        """Configura el gestor de cluster multi-nodo."""
+        self._cluster_manager = cluster_manager
 
     def set_provider(
         self,
@@ -494,39 +512,18 @@ class InferenceRouter:
                 headers["Authorization"] = f"Bearer {clean_key}"
         return headers
 
-    async def chat_completions(
+    async def _execute_chat_request(
         self,
-        messages: List[Dict[str, str]],
-        model: Optional[str] = None,
-        temperature: float = 0.7,
-        **kwargs: Any,
+        url: str,
+        payload: Dict[str, Any],
+        headers: Dict[str, str],
+        target_model: str,
+        provider_name: str,
     ) -> Dict[str, Any]:
-        """
-        Executes a non-streaming asynchronous chat completion request.
-
-        Args:
-            messages (List[Dict[str, str]]): Conversation history messages.
-            model (Optional[str]): Override model name for this request.
-            temperature (float): Sampling temperature.
-            **kwargs: Additional parameters passed to LLM payload.
-
-        Returns:
-            Dict[str, Any]: Structured dictionary with success status and data/error details.
-        """
-        target_model = model or self._model
-        url = self.get_endpoint_url("/chat/completions")
-        headers = self.get_headers()
-        payload = self._prepare_payload(
-            messages=messages,
-            model=target_model,
-            temperature=temperature,
-            stream=False,
-            **kwargs,
-        )
-
+        """Ejecuta una petición HTTP individual no-streaming con diagnóstico completo de errores."""
         client_timeout = aiohttp.ClientTimeout(total=self._timeout)
         start_time = time.monotonic()
-        logger.info(f"Petición no-streaming iniciada -> {self._provider} ({target_model}) en {url}")
+        logger.info(f"Petición no-streaming iniciada -> {provider_name} ({target_model}) en {url}")
 
         try:
             async with aiohttp.ClientSession(timeout=client_timeout) as session:
@@ -555,7 +552,7 @@ class InferenceRouter:
                             }
                             logger.info(f"Petición exitosa Claude (HTTP 200 - {latency} ms)")
                             return {"success": True, "data": normalized_data}
-                        logger.info(f"Petición exitosa {self._provider} (HTTP 200 - {latency} ms)")
+                        logger.info(f"Petición exitosa {provider_name} (HTTP 200 - {latency} ms)")
                         return {"success": True, "data": data}
                     else:
                         try:
@@ -564,7 +561,7 @@ class InferenceRouter:
                         except Exception:
                             error_text = ""
                         logger.warning(
-                            f"Fallo HTTP {response.status} en {self._provider}: {error_text[:200]}"
+                            f"Fallo HTTP {response.status} en {provider_name}: {error_text[:200]}"
                         )
                         diag = diagnose_inference_failure(
                             provider=self._provider,
@@ -585,7 +582,7 @@ class InferenceRouter:
                         }
 
         except aiohttp.ClientConnectorError as e:
-            logger.error(f"Conexión rehusada con {self._provider} en {self._base_url}: {e}")
+            logger.error(f"Conexión rehusada con {provider_name} en {url}: {e}")
             diag = diagnose_inference_failure(
                 provider=self._provider,
                 model=target_model,
@@ -597,12 +594,12 @@ class InferenceRouter:
             return {
                 "success": False,
                 "error_type": "ConnectionError",
-                "message": f"Conexión rehusada al servidor ({self._provider} en {self._base_url}): {str(e)}",
+                "message": f"Conexión rehusada al servidor ({provider_name} en {url}): {str(e)}",
                 "diagnostic": diag,
                 "diagnostic_md": diag.to_markdown(),
             }
         except asyncio.TimeoutError:
-            logger.warning(f"Timeout ({self._timeout}s) agotado contactando {self._provider}")
+            logger.warning(f"Timeout ({self._timeout}s) agotado contactando {provider_name}")
             diag = diagnose_inference_failure(
                 provider=self._provider,
                 model=target_model,
@@ -613,12 +610,12 @@ class InferenceRouter:
             return {
                 "success": False,
                 "error_type": "TimeoutError",
-                "message": f"Tiempo de espera agotado ({self._timeout}s) contactando {self._provider}.",
+                "message": f"Tiempo de espera agotado ({self._timeout}s) contactando {provider_name}.",
                 "diagnostic": diag,
                 "diagnostic_md": diag.to_markdown(),
             }
         except Exception as e:
-            logger.error(f"Excepción en petición a {self._provider}: {e}", exc_info=e)
+            logger.error(f"Excepción en petición a {provider_name}: {e}", exc_info=e)
             diag = diagnose_inference_failure(
                 provider=self._provider,
                 model=target_model,
@@ -630,46 +627,92 @@ class InferenceRouter:
             return {
                 "success": False,
                 "error_type": "Exception",
-                "message": f"Excepción en petición a {self._provider}: {str(e)}",
+                "message": f"Excepción en petición a {provider_name}: {str(e)}",
                 "diagnostic": diag,
                 "diagnostic_md": diag.to_markdown(),
             }
 
-    async def stream_chat_completions(
+    async def chat_completions(
         self,
         messages: List[Dict[str, str]],
         model: Optional[str] = None,
         temperature: float = 0.7,
         **kwargs: Any,
-    ) -> AsyncGenerator[Dict[str, Any], None]:
+    ) -> Dict[str, Any]:
         """
-        Asynchronously streams chat completion responses chunk-by-chunk using Server-Sent Events (SSE).
-        Supports reasoning/thinking token separation (Plan 01) and Turbo Mode micro-batching.
-
-        Args:
-            messages (List[Dict[str, str]]): Conversation history messages.
-            model (Optional[str]): Override model name for this request.
-            temperature (float): Sampling temperature.
-            **kwargs: Additional payload arguments.
-
-        Yields:
-            Dict[str, Any]: Structured dicts containing chunk data or error status with diagnostics.
+        Executes a non-streaming asynchronous chat completion request.
+        Supports multi-node cluster failover if configured.
         """
         target_model = model or self._model
+
+        # Modo Cluster Multi-Nodo con Conmutación por Error
+        if self._provider == "cluster" and self._cluster_manager:
+            eligible_nodes = [n for n in self._cluster_manager.get_nodes() if n.is_active]
+            max_attempts = max(1, len(eligible_nodes))
+            last_err = None
+            for _ in range(max_attempts):
+                node = self._cluster_manager.select_node()
+                if not node:
+                    break
+                node_url = node.url.rstrip("/")
+                endpoint = f"{node_url}/chat/completions"
+                node_headers = self.get_headers()
+                if node.api_key:
+                    node_headers["Authorization"] = f"Bearer {node.api_key}"
+                node_model = node.model or target_model
+                node_payload = self._prepare_payload(
+                    messages=messages,
+                    model=node_model,
+                    temperature=temperature,
+                    stream=False,
+                    **kwargs,
+                )
+                res = await self._execute_chat_request(
+                    url=endpoint,
+                    payload=node_payload,
+                    headers=node_headers,
+                    target_model=node_model,
+                    provider_name=f"Cluster Node: {node.name}",
+                )
+                if res.get("success"):
+                    return res
+                else:
+                    self._cluster_manager.mark_node_failure(node.name)
+                    last_err = res
+                    logger.warning(f"Nodo de cluster '{node.name}' falló. Conmutando al siguiente nodo...")
+            if last_err:
+                return last_err
+
         url = self.get_endpoint_url("/chat/completions")
         headers = self.get_headers()
-        headers["Accept"] = "text/event-stream"
         payload = self._prepare_payload(
             messages=messages,
             model=target_model,
             temperature=temperature,
-            stream=True,
+            stream=False,
             **kwargs,
         )
+        return await self._execute_chat_request(
+            url=url,
+            payload=payload,
+            headers=headers,
+            target_model=target_model,
+            provider_name=self._provider,
+        )
 
+    async def _execute_stream_request(
+        self,
+        url: str,
+        payload: Dict[str, Any],
+        headers: Dict[str, str],
+        target_model: str,
+        provider_name: str,
+        **kwargs: Any,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """Ejecuta una petición SSE streaming individual y procesa fragmentos y tokens de razonamiento."""
         client_timeout = aiohttp.ClientTimeout(total=self._timeout)
         start_time = time.monotonic()
-        logger.info(f"Iniciando SSE stream -> {self._provider} ({target_model}) en {url}")
+        logger.info(f"Iniciando SSE stream -> {provider_name} ({target_model}) en {url}")
 
         try:
             async with aiohttp.ClientSession(timeout=client_timeout) as session:
@@ -681,7 +724,7 @@ class InferenceRouter:
                         except Exception:
                             error_text = ""
                         logger.warning(
-                            f"Fallo HTTP {response.status} en streaming con {self._provider}: {error_text[:200]}"
+                            f"Fallo HTTP {response.status} en streaming con {provider_name}: {error_text[:200]}"
                         )
                         diag = diagnose_inference_failure(
                             provider=self._provider,
@@ -937,7 +980,102 @@ class InferenceRouter:
             yield {
                 "success": False,
                 "error_type": "Exception",
-                "message": f"Excepción durante el streaming con {self._provider}: {str(e)}",
+                "message": f"Excepción durante el streaming con {provider_name}: {str(e)}",
                 "diagnostic": diag,
                 "diagnostic_md": diag.to_markdown(),
             }
+
+    async def stream_chat_completions(
+        self,
+        messages: List[Dict[str, str]],
+        model: Optional[str] = None,
+        temperature: float = 0.7,
+        **kwargs: Any,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        Asynchronously streams chat completion responses chunk-by-chunk using Server-Sent Events (SSE).
+        Supports reasoning/thinking token separation (Plan 01), Turbo Mode micro-batching, and cluster failover.
+
+        Args:
+            messages (List[Dict[str, str]]): Conversation history messages.
+            model (Optional[str]): Override model name for this request.
+            temperature (float): Sampling temperature.
+            **kwargs: Additional payload arguments.
+
+        Yields:
+            Dict[str, Any]: Structured dicts containing chunk data or error status with diagnostics.
+        """
+        target_model = model or self._model
+
+        # Modo Cluster Multi-Nodo con Conmutación por Error
+        if self._provider == "cluster" and self._cluster_manager:
+            eligible_nodes = [n for n in self._cluster_manager.get_nodes() if n.is_active]
+            max_attempts = max(1, len(eligible_nodes))
+            last_err_chunk = None
+            for _ in range(max_attempts):
+                node = self._cluster_manager.select_node()
+                if not node:
+                    break
+                node_url = node.url.rstrip("/")
+                endpoint = f"{node_url}/chat/completions"
+                node_headers = self.get_headers()
+                node_headers["Accept"] = "text/event-stream"
+                if node.api_key:
+                    node_headers["Authorization"] = f"Bearer {node.api_key}"
+                node_model = node.model or target_model
+                node_payload = self._prepare_payload(
+                    messages=messages,
+                    model=node_model,
+                    temperature=temperature,
+                    stream=True,
+                    **kwargs,
+                )
+                yielded_any = False
+                failed_early = False
+                async for chunk_obj in self._execute_stream_request(
+                    url=endpoint,
+                    payload=node_payload,
+                    headers=node_headers,
+                    target_model=node_model,
+                    provider_name=f"Cluster Node: {node.name}",
+                    **kwargs,
+                ):
+                    if not chunk_obj.get("success") and not yielded_any:
+                        failed_early = True
+                        last_err_chunk = chunk_obj
+                        self._cluster_manager.mark_node_failure(node.name)
+                        logger.warning(
+                            f"Nodo de cluster '{node.name}' falló antes de emitir tokens. Conmutando al siguiente nodo..."
+                        )
+                        break
+                    yielded_any = True
+                    yield chunk_obj
+
+                if yielded_any and not failed_early:
+                    return
+
+            if last_err_chunk:
+                yield last_err_chunk
+                return
+
+        # Modo Proveedor Individual Estándar
+        url = self.get_endpoint_url("/chat/completions")
+        headers = self.get_headers()
+        headers["Accept"] = "text/event-stream"
+        payload = self._prepare_payload(
+            messages=messages,
+            model=target_model,
+            temperature=temperature,
+            stream=True,
+            **kwargs,
+        )
+        async for chunk_obj in self._execute_stream_request(
+            url=url,
+            payload=payload,
+            headers=headers,
+            target_model=target_model,
+            provider_name=self._provider,
+            **kwargs,
+        ):
+            yield chunk_obj
+

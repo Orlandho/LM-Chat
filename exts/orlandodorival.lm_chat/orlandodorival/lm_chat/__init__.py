@@ -8,9 +8,10 @@ LM-Chat™: Autonomous Spatial AI Assistant & Neural Copilot for NVIDIA Omnivers
 __version__ = "1.1.0"
 
 try:
-    from .extension import *
+    from extension import *
 except (ImportError, ModuleNotFoundError):
-    try:
-        from extension import *
-    except (ImportError, ModuleNotFoundError):
-        pass
+    pass
+
+
+def some_public_function(x: int) -> int:
+    return x ** 4

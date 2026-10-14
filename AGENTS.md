@@ -8,7 +8,7 @@ This document establishes the universal development laws, architectural invarian
 ## 🌟 1. Core Mission & Technical Identity
 
 - **Commercial Brand:** `LM-Chat™`
-- **NVIDIA Omniverse Extension ID:** `omni.lm_chat`
+- **NVIDIA Omniverse Extension ID:** `orlandodorival.lm_chat`
 - **Target Runtime:** NVIDIA Omniverse Kit SDK 105 / 106 / 107+ (USD Composer, Isaac Sim, Omniverse Code)
 - **Primary Interface:** Native `omni.ui` dockable chat window (GUI).
 - **Secondary Interface:** Headless/REPL Terminal CLI (`cli/lmchat_cli.py`).
@@ -60,16 +60,17 @@ Allowed types:
 
 ### 3.2. Strict Multi-File Version Synchronization
 The software version MUST remain 100% identical across all target files:
-1. `config/extension.toml` (`version = "X.Y.Z"`)
-2. `__init__.py` (`__version__ = "X.Y.Z"`)
-3. `CITATION.cff` (`version: X.Y.Z` and `date-released: YYYY-MM-DD`)
-4. `pyproject.toml` (`version = "X.Y.Z"`)
-5. `docs/CHANGELOG.md` (Structured according to *Keep a Changelog*)
+1. `exts/orlandodorival.lm_chat/config/extension.toml` (`version = "X.Y.Z"`)
+2. `exts/orlandodorival.lm_chat/__init__.py` (`__version__ = "X.Y.Z"`)
+3. `exts/orlandodorival.lm_chat/orlandodorival/lm_chat/__init__.py` (`__version__ = "X.Y.Z"`)
+4. `CITATION.cff` (`version: X.Y.Z` and `date-released: YYYY-MM-DD`)
+5. `pyproject.toml` (`version = "X.Y.Z"`)
+6. `docs/CHANGELOG.md` (Structured according to *Keep a Changelog*)
 
 > ⚠️ **Sanity Check Rule:** Never edit version numbers manually in only one file. Always run `python scripts/release.py [patch|minor|major] --dry-run` to verify synchronization across all files before cutting a release.
 
 ### 3.3. Automated Packaging for NVIDIA Omniverse
-In `.github/workflows/release.yml`, releases automatically build a zip archive where the top-level directory is strictly named `omni.lm_chat/`. Never use dynamic repository names or versions in the root folder, as NVIDIA Omniverse Kit requires exact directory matching for its Extension Manager.
+In `.github/workflows/release.yml`, releases automatically build a zip archive where the top-level directory is strictly named `orlandodorival.lm_chat/`. Never use dynamic repository names or versions in the root folder, as NVIDIA Omniverse Kit requires exact directory matching for its Extension Manager.
 
 ---
 

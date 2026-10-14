@@ -15,9 +15,9 @@
 ## 1. Brand Identity & Product Hierarchy
 
 - **Commercial Brand:** **LM-Chat™**
-- **NVIDIA Omniverse Extension ID:** `omni.lm_chat`
+- **NVIDIA Omniverse Extension ID:** `orlandodorival.lm_chat`
 - **CLI Harness Brand:** **LM-Chat CLI** (`cli/lmchat_cli.py`)
-- **Package Title:** LM-Chat
+- **Package Title:** LM-Chat: AI Agent & MCP Integration
 - **Target Runtime:** NVIDIA Omniverse Kit SDK 105 / 106 / 107+ (USD Composer, Isaac Sim, Omniverse Code)
 - **Tagline:** *The Native Autonomous Spatial AI Copilot for NVIDIA Omniverse.*
 - **Lead Architect & Author:** Orlando Dorival
@@ -128,9 +128,9 @@ python cli/lmchat_cli.py --provider cloud --model gemini-2.5-flash --prompt "Con
 
 | Component | Technical Identifier | Legacy Identifier (Deprecated Alias) | Status |
 | :--- | :--- | :--- | :--- |
-| **Extension ID** | `omni.lm_chat` | `orlandoexplorer.ia_test` | **Official Active** |
+| **Extension ID** | `orlandodorival.lm_chat` | `omni.lm_chat`, `orlandoexplorer.ia_test` | **Official Active** |
 | **Extension Class** | `LMChatExtension` | `MyExtension` | **Official Active** |
-| **Kit Config** | `config/extension.toml` | N/A | **Official Active** |
+| **Kit Config** | `exts/orlandodorival.lm_chat/config/extension.toml` | `config/extension.toml` | **Official Active** |
 | **CLI Class** | `LMChatCLI` | `OmniCLI` | **Official Active** |
 | **CLI Entrypoint** | `cli/lmchat_cli.py` | `cli/omni_harness.py` | **Official Active** |
 | **Brand Trademark** | **LM-Chat™** | `OmniAgent` / `ia_test` | **Official Active** |

@@ -152,6 +152,8 @@ class InferenceConfig:
     timeout: float = 600.0
     turbo_mode: bool = False
     is_reasoning: bool = False
+    tools: Optional[List[Dict[str, Any]]] = None
+    integrations: Optional[List[Dict[str, Any]]] = None
 
 class IInferenceRouter(ABC):
     """Contrato para el Router Multi-Proveedor de Inferencia (Jules Issue #35)."""
@@ -421,6 +423,114 @@ class ISettingsManager(ABC):
     def remove_mcp_server(self, name: str) -> bool:
         """Elimina la configuración persistente de un servidor MCP."""
         return False
+
+
+class ClusterFailoverStrategy(str, Enum):
+    """Estrategias de enrutamiento y conmutación por error en clusters de inferencia."""
+    PRIORITY = "priority"
+    ROUND_ROBIN = "round_robin"
+    LOWEST_LATENCY = "lowest_latency"
+
+
+@dataclass
+class ClusterNode:
+    """Representa un nodo de inferencia en un cluster local o distribuido."""
+    name: str
+    url: str
+    api_key: Optional[str] = None
+    model: Optional[str] = None
+    weight: int = 1
+    is_active: bool = True
+    is_healthy: bool = True
+    last_latency_ms: float = 0.0
+    last_checked_at: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "name": self.name,
+            "url": self.url,
+            "api_key": self.api_key,
+            "model": self.model,
+            "weight": self.weight,
+            "is_active": self.is_active,
+            "is_healthy": self.is_healthy,
+            "last_latency_ms": self.last_latency_ms,
+            "last_checked_at": self.last_checked_at,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ClusterNode":
+        return cls(
+            name=data.get("name", "Node"),
+            url=data.get("url", "http://localhost:1234/v1"),
+            api_key=data.get("api_key"),
+            model=data.get("model"),
+            weight=int(data.get("weight", 1)),
+            is_active=bool(data.get("is_active", True)),
+            is_healthy=bool(data.get("is_healthy", True)),
+            last_latency_ms=float(data.get("last_latency_ms", 0.0)),
+            last_checked_at=data.get("last_checked_at"),
+        )
+
+
+class IClusterManager(ABC):
+    """Contrato para orquestación de clusters de inferencia multi-nodo con conmutación por error."""
+
+    @abstractmethod
+    def get_nodes(self) -> List[ClusterNode]:
+        """Retorna la lista de nodos configurados en el cluster."""
+        pass
+
+    @abstractmethod
+    def add_node(self, node: ClusterNode) -> None:
+        """Registra un nuevo nodo de inferencia en el cluster."""
+        pass
+
+    @abstractmethod
+    def remove_node(self, name: str) -> bool:
+        """Elimina un nodo del cluster por nombre."""
+        pass
+
+    @abstractmethod
+    async def check_health_all(self) -> Dict[str, bool]:
+        """Verifica la salud y latencia de todos los nodos concurrentemente."""
+        pass
+
+    @abstractmethod
+    def select_node(self) -> Optional[ClusterNode]:
+        """Selecciona el siguiente nodo óptimo según la estrategia de balanceo."""
+        pass
+
+    @abstractmethod
+    def mark_node_failure(self, name: str) -> None:
+        """Registra una falla en un nodo para evitar enrutarle solicitudes inmediatas."""
+        pass
+
+
+class ILMStudioVRAMManager(ABC):
+    """Contrato para gestión dinámica de VRAM y ciclo de vida de modelos en LM Studio 0.4.x+."""
+
+    @abstractmethod
+    async def list_loaded_models(self) -> List[Dict[str, Any]]:
+        """Consulta los modelos actualmente cargados o disponibles en el servidor LM Studio."""
+        pass
+
+    @abstractmethod
+    async def load_model(
+        self,
+        model_name: str,
+        context_length: Optional[int] = None,
+        flash_attention: bool = True,
+        offload_kv_cache_to_gpu: bool = True,
+    ) -> Dict[str, Any]:
+        """Carga programáticamente un modelo en memoria/VRAM vía POST /api/v1/models/load."""
+        pass
+
+    @abstractmethod
+    async def unload_model(self, instance_id: str) -> Dict[str, Any]:
+        """Descarga un modelo de la VRAM vía POST /api/v1/models/unload para liberar GPU para Omniverse RTX."""
+        pass
+
 
 
 

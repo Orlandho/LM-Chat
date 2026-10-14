@@ -6,10 +6,14 @@ import unittest
 from types import ModuleType
 from unittest.mock import MagicMock, AsyncMock
 
-# Asegurar que la raíz del proyecto esté en sys.path para pytest y unittest en CI/CD y local
+# Asegurar que la extensión y la raíz del proyecto estén en sys.path para pytest y unittest en CI/CD y local
 repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if repo_root not in sys.path:
-    sys.path.insert(0, repo_root)
+ext_pkg_root = os.path.join(repo_root, "exts", "orlandodorival.lm_chat")
+exts_root = os.path.join(repo_root, "exts")
+
+for p in [ext_pkg_root, exts_root, repo_root]:
+    if p not in sys.path:
+        sys.path.insert(0, p)
 
 # Mocks para evadir los requisitos de ejecución nativa de Omniverse Kit.
 # Permite que Jules y los desarrolladores puedan ejecutar pytest en cualquier entorno sin lanzar el software 3D.

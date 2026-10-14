@@ -39,7 +39,7 @@ class LMChatExtension(omni.ext.IExt):
 
     def on_startup(self, _ext_id):
         """Called when the extension is enabled."""
-        print("[omni.lm_chat] LM-Chat Extension startup")
+        print("[orlandodorival.lm_chat] LM-Chat Extension startup")
 
         self._history_manager = LocalChatHistoryManager()
         self._agent_manager = AgentManager()
@@ -204,7 +204,7 @@ class LMChatExtension(omni.ext.IExt):
 
     def on_shutdown(self):
         """Called when the extension is disabled."""
-        print("[omni.lm_chat] LM-Chat Extension shutdown")
+        print("[orlandodorival.lm_chat] LM-Chat Extension shutdown")
         if hasattr(self, "_chat_window") and self._chat_window:
             self._chat_window.destroy()
             self._chat_window = None
