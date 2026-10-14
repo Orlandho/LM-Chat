@@ -19,7 +19,8 @@ class TestChatModel:
     def test_model_initialization(self):
         model = ChatModel()
         assert model.current_provider == "LM Studio"
-        assert model.current_model == "local-model"
+        expected_default = model.settings_manager.get_default_model("LM Studio")
+        assert model.current_model == expected_default
         assert model.status == "Listo"
         assert not model.is_loading
         assert len(model.messages) == 0
@@ -41,7 +42,8 @@ class TestChatModel:
         model = ChatModel()
         model.set_provider("Ollama")
         assert model.current_provider == "Ollama"
-        assert model.current_model == "llama3:latest"
+        expected_default = model.settings_manager.get_default_model("Ollama")
+        assert model.current_model == expected_default
 
         model.set_model("codellama:7b")
         assert model.current_model == "codellama:7b"

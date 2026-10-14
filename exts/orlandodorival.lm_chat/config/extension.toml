@@ -1,0 +1,22 @@
+[package]
+title = "LM-Chat: AI Agent & MCP Integration"
+description = "Autonomous Spatial AI Copilot for NVIDIA Omniverse with MCP, reasoning models, and cluster support."
+version = "1.1.0"
+category = "AI"
+keywords = ["ai", "llm", "mcp", "chat", "usd", "omniverse", "agent"]
+changelog = "docs/CHANGELOG.md"
+readme = "README.md"
+preview_image = "data/preview.png"
+icon = "data/icon.png"
+authors = ["Orlando Dorival"]
+repository = "https://github.com/Orlandho/LM-Chat"
+
+[package.write_protect]
+enabled = false
+
+[[python.module]]
+name = "orlandodorival.lm_chat"
+
+[dependencies]
+"omni.kit.uiapp" = {}
+"omni.usd" = {}

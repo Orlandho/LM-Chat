@@ -24,8 +24,12 @@ if sys.platform == "win32":
     except Exception:
         pass
 
-# Ensure project root is in sys.path when running cli/omni_harness.py directly
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+# Ensure project root and extension package are in sys.path when running cli/omni_harness.py directly
+repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+ext_pkg_root = os.path.join(repo_root, "exts", "orlandodorival.lm_chat")
+for p in [ext_pkg_root, repo_root]:
+    if p not in sys.path:
+        sys.path.insert(0, p)
 
 from logic.inference_router import InferenceRouter
 from logic.chat_history import LocalChatHistoryManager
@@ -59,9 +63,10 @@ def parse_arguments() -> argparse.Namespace:
         "--provider",
         type=str,
         default="lm_studio",
-        choices=["lm_studio", "ollama", "vllm", "cloud"],
+        choices=["lm_studio", "ollama", "vllm", "cloud", "openai", "claude", "nvidia_spark"],
         help="Inference provider (default: lm_studio)",
     )
+
     parser.add_argument(
         "-m",
         "--model",
@@ -265,11 +270,12 @@ class LMChatCLI:
         sessions = self.history_manager.list_sessions()
         target_id: Optional[str] = None
 
-        if clean_id.isdigit():
+        if clean_id.isdigit() and len(clean_id) < 6:
             idx = int(clean_id) - 1
             if 0 <= idx < len(sessions):
                 target_id = sessions[idx]["session_id"]
-        else:
+
+        if not target_id:
             for s in sessions:
                 if s["session_id"].startswith(clean_id):
                     target_id = s["session_id"]
@@ -317,11 +323,12 @@ class LMChatCLI:
         sessions = self.history_manager.list_sessions()
         target_id: Optional[str] = None
 
-        if clean_id.isdigit():
+        if clean_id.isdigit() and len(clean_id) < 6:
             idx = int(clean_id) - 1
             if 0 <= idx < len(sessions):
                 target_id = sessions[idx]["session_id"]
-        else:
+
+        if not target_id:
             for s in sessions:
                 if s["session_id"].startswith(clean_id):
                     target_id = s["session_id"]

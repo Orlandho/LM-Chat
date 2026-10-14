@@ -9,8 +9,9 @@ proveedores de inferencia y badges de estado.
 
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional, Callable
-from core.interfaces import ChatMessage, ChatSession, IChatHistoryManager
+from core.interfaces import ChatMessage, ChatSession, IChatHistoryManager, ISettingsManager
 from logic.chat_history import LocalChatHistoryManager
+from logic.settings_manager import SettingsManager
 
 
 class ChatModel:
@@ -19,36 +20,59 @@ class ChatModel:
     DEFAULT_PROVIDERS: List[str] = [
         "LM Studio",
         "Ollama",
+        "OpenAI API",
+        "Claude API",
+        "NVIDIA Spark",
+        "Google Gemini API",
         "vLLM",
         "Nemotron",
         "Cloud APIs",
     ]
 
     DEFAULT_MODELS_MAP: Dict[str, List[str]] = {
-        "LM Studio": ["local-model", "qwen2.5-coder-7b", "deepseek-r1-distill-qwen-14b"],
-        "Ollama": ["llama3:latest", "codellama:7b", "mistral:latest"],
+        "LM Studio": ["local-model", "qwen2.5-coder-7b", "qwen2.5-coder-14b", "qwen2.5-coder-32b", "deepseek-r1-distill-qwen-14b", "deepseek-r1-distill-qwen-32b", "llama-3.2-3b-instruct", "llama-3.3-70b-instruct"],
+        "Ollama": ["llama3.3:latest", "llama3:latest", "llama3.1:8b", "qwen2.5-coder:7b", "qwen2.5-coder:14b", "qwen2.5-coder:32b", "deepseek-r1:8b", "deepseek-r1:14b", "deepseek-r1:32b", "codellama:7b", "mistral:latest"],
+        "OpenAI API": ["gpt-4o", "gpt-4o-mini", "o3-mini", "o1", "o1-mini", "gpt-4.5-preview", "gpt-4-turbo"],
+        "Claude API": ["claude-3-7-sonnet-latest", "claude-3-5-sonnet-latest", "claude-3-5-haiku-latest", "claude-3-5-opus-latest", "claude-3-opus-latest"],
+        "NVIDIA Spark": ["nvidia/llama-3.1-nemotron-70b-instruct", "meta/llama-3.1-70b-instruct", "meta/llama-3.1-405b-instruct", "nvidia/nemotron-4-340b-instruct", "mistralai/mixtral-8x22b-instruct-v0.1", "deepseek-ai/deepseek-r1"],
+        "Google Gemini API": ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"],
         "vLLM": ["meta-llama/Meta-Llama-3-8B-Instruct", "Qwen/Qwen2.5-Coder-32B-Instruct"],
         "Nemotron": ["nvidia/nemotron-4-340b-instruct"],
-        "Cloud APIs": ["gpt-4o", "claude-3-5-sonnet", "gemini-1.5-pro"],
+        "Cloud APIs": ["gpt-4o", "claude-3-7-sonnet-latest", "claude-3-5-sonnet-latest", "gemini-2.0-flash"],
     }
 
-    def __init__(self, history_manager: Optional[IChatHistoryManager] = None) -> None:
+    def __init__(
+        self,
+        history_manager: Optional[IChatHistoryManager] = None,
+        settings_manager: Optional[ISettingsManager] = None,
+    ) -> None:
         """Inicializa el modelo con la lista de mensajes, gestor de historial y estados por defecto.
 
         Args:
             history_manager (Optional[IChatHistoryManager]): Gestor de historial de chat inyectado.
+            settings_manager (Optional[ISettingsManager]): Gestor de configuración persistente.
         """
         self._history_manager: IChatHistoryManager = (
             history_manager if history_manager is not None else LocalChatHistoryManager()
         )
+        self._settings_manager: ISettingsManager = (
+            settings_manager if settings_manager is not None else SettingsManager()
+        )
         self._current_session: Optional[ChatSession] = None
         self._messages: List[ChatMessage] = []
         self._providers: List[str] = list(self.DEFAULT_PROVIDERS)
-        self._selected_provider: str = self._providers[0]
-        self._selected_model: str = self.DEFAULT_MODELS_MAP[self._selected_provider][0]
+        
+        # Sincronizar con el proveedor predeterminado configurado en settings
+        default_prov = self._settings_manager.get_default_provider()
+        matched = self._find_matching_provider(default_prov)
+        self._selected_provider: str = matched or self._providers[0]
+        self._selected_model: str = self._settings_manager.get_default_model(self._selected_provider)
+        self._execution_mode: str = getattr(self._settings_manager, "get_execution_mode", lambda: "immediate")()
+        self._turbo_mode: bool = getattr(self._settings_manager, "is_turbo_mode", lambda: False)()
         self._status: str = "Listo"
         self._is_loading: bool = False
         self._listeners: List[Callable[[], None]] = []
+
 
     @property
     def history_manager(self) -> IChatHistoryManager:
@@ -106,9 +130,44 @@ class ChatModel:
         return self._selected_model
 
     @property
+    def settings_manager(self) -> ISettingsManager:
+        """Obtiene el gestor de configuración persistente."""
+        return self._settings_manager
+
+    @property
     def available_models(self) -> List[str]:
         """Obtiene la lista de modelos para el proveedor actual."""
+        if hasattr(self, "_settings_manager") and self._settings_manager:
+            models = self._settings_manager.get_available_models(self._selected_provider)
+            if models:
+                return models
         return list(self.DEFAULT_MODELS_MAP.get(self._selected_provider, ["default"]))
+
+    @property
+    def execution_mode(self) -> str:
+        """Obtiene el modo de ejecución activo ('immediate' o 'plan_and_confirm')."""
+        return self._execution_mode
+
+    def set_execution_mode(self, mode: str) -> None:
+        """Actualiza el modo de ejecución activo y lo notifica a la vista."""
+        clean_mode = "plan_and_confirm" if "plan" in mode.lower() else "immediate"
+        self._execution_mode = clean_mode
+        if hasattr(self._settings_manager, "set_execution_mode"):
+            self._settings_manager.set_execution_mode(clean_mode)
+        self._notify()
+
+    @property
+    def turbo_mode(self) -> bool:
+        """Indica si el modo turbo con micro-batching está activado."""
+        return self._turbo_mode
+
+    def set_turbo_mode(self, enabled: bool) -> None:
+        """Activa o desactiva el modo turbo y lo notifica a la vista."""
+        self._turbo_mode = bool(enabled)
+        if hasattr(self._settings_manager, "set_turbo_mode"):
+            self._settings_manager.set_turbo_mode(self._turbo_mode)
+        self._notify()
+
 
     def _find_matching_provider(self, provider_query: Optional[str]) -> Optional[str]:
         """Busca el nombre canónico del proveedor de forma tolerante a mayúsculas y formatos."""
@@ -127,7 +186,24 @@ class ChatModel:
             for p in self._providers:
                 if "lm" in p.lower() and "studio" in p.lower():
                     return p
+        if norm_query in ("openai", "openaiapi", "open_ai"):
+            for p in self._providers:
+                if "openai" in p.lower().replace(" ", ""):
+                    return p
+        if norm_query in ("claude", "claudeapi", "anthropic"):
+            for p in self._providers:
+                if "claude" in p.lower().replace(" ", "") or "anthropic" in p.lower():
+                    return p
+        if norm_query in ("nvidia", "nvidiaspark", "spark", "dgxspark", "nemotron"):
+            for p in self._providers:
+                if "nvidia" in p.lower() or "spark" in p.lower() or "nemotron" in p.lower():
+                    return p
+        if norm_query in ("gemini", "google", "googlegemini", "geminiapi", "googlegeminiapi"):
+            for p in self._providers:
+                if "gemini" in p.lower():
+                    return p
         return None
+
 
     @property
     def status(self) -> str:
@@ -317,9 +393,12 @@ class ChatModel:
         matched = self._find_matching_provider(provider)
         if matched:
             self._selected_provider = matched
-            models = self.available_models
-            if models:
-                self._selected_model = models[0]
+            if hasattr(self, "_settings_manager") and self._settings_manager:
+                self._selected_model = self._settings_manager.get_default_model(matched)
+            else:
+                models = self.available_models
+                if models:
+                    self._selected_model = models[0]
             if self._current_session:
                 if not self._current_session.metadata:
                     self._current_session.metadata = {}

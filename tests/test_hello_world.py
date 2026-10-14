@@ -21,6 +21,7 @@ import omni.kit.ui_test as ui_test
 # Import extension python module we are testing with absolute import path,
 # as if we are external user (other extension)
 import omni.lm_chat
+import orlandodorival.lm_chat
 import orlandoexplorer.ia_test
 
 
@@ -39,6 +40,8 @@ class Test(omni.kit.test.AsyncTestCase):
     async def test_hello_public_function(self):
         result_lm = omni.lm_chat.some_public_function(4)
         self.assertEqual(result_lm, 256)
+        result_orlando = orlandodorival.lm_chat.some_public_function(4)
+        self.assertEqual(result_orlando, 256)
         result_legacy = orlandoexplorer.ia_test.some_public_function(4)
         self.assertEqual(result_legacy, 256)
 

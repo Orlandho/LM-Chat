@@ -19,4 +19,5 @@ env/
 
 # Pytest y archivos de desarrollo local
 .pytest_cache/
+.pytest_temp/
 scratch/
