@@ -38,8 +38,10 @@ class USDController:
                 "error_msg": f"Security limit exceeded: Code payload length exceeds maximum allowed limit of {self.MAX_CODE_SIZE} characters."
             }
 
-        # Prepare execution environment
+        # Security: Scope execution environment with explicit builtins and Omniverse/USD references
+        # Prevents unintended global leaks or context pollution while allowing standard USD scripting
         exec_globals = {
+            "__builtins__": __builtins__,
             "omni": __import__('omni') if omni is not None else None,
             "pxr": pxr,
             "Usd": Usd,

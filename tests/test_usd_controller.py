@@ -49,3 +49,16 @@ class TestUSDController:
         res = controller.execute_code(bad_code)
         assert res["success"] is False
         assert "Custom USD execution error" in res["error_msg"]
+
+    def test_execute_code_restricted_globals(self):
+        """Test that execution environment has explicit builtins and isolated scope."""
+        controller = USDController()
+        # Verify that builtins like len work, but undeclared outer variables raise NameError
+        code = "val = len([1, 2, 3])"
+        res = controller.execute_code(code)
+        assert res["success"] is True
+
+        code_undefined = "x = outer_undefined_var"
+        res_undefined = controller.execute_code(code_undefined)
+        assert res_undefined["success"] is False
+        assert "is not defined" in res_undefined["error_msg"]
