@@ -327,3 +327,23 @@ class TestLocalChatHistoryManager:
         session_file = mgr._get_session_path(imported.session_id)
         assert os.path.dirname(session_file) == str(tmp_path)
         assert os.path.exists(session_file)
+
+    def test_sanitize_session_id_handles_non_string_types(self, tmp_path):
+        mgr = LocalChatHistoryManager(storage_dir=str(tmp_path))
+        # Non-string types should not raise TypeError
+        assert mgr._sanitize_session_id(None)
+        assert mgr._sanitize_session_id(12345) == "12345"
+        assert mgr._sanitize_session_id(3.14) == "314"
+        assert mgr._sanitize_session_id(["invalid"])
+        assert mgr._sanitize_session_id({})
+
+    def test_import_session_json_validates_payload_size_and_type(self, tmp_path):
+        mgr = LocalChatHistoryManager(storage_dir=str(tmp_path))
+        # Non-string or empty payloads
+        assert mgr.import_session_json(None) is None
+        assert mgr.import_session_json("") is None
+        assert mgr.import_session_json(12345) is None
+
+        # Oversized payload exceeding MAX_IMPORT_SIZE
+        oversized = "a" * (LocalChatHistoryManager.MAX_IMPORT_SIZE + 1)
+        assert mgr.import_session_json(oversized) is None

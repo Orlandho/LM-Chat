@@ -22,6 +22,7 @@ class LocalChatHistoryManager(IChatHistoryManager):
     """Implementación local y desacoplada del historial de conversaciones."""
 
     DEFAULT_TITLE = "Nueva Conversación"
+    MAX_IMPORT_SIZE: int = 10_000_000  # 10MB payload limit to prevent memory exhaustion DoS
 
     def __init__(self, storage_dir: Optional[str] = None) -> None:
         """Inicializa el gestor de historial local.
@@ -55,16 +56,18 @@ class LocalChatHistoryManager(IChatHistoryManager):
         except Exception as e:
             print(f"[LocalChatHistoryManager] Error creando directorio {self._storage_dir}: {e}")
 
-    def _sanitize_session_id(self, session_id: str) -> str:
+    def _sanitize_session_id(self, session_id: Any) -> str:
         """Limpia el identificador de sesión para evitar vulnerabilidades de directory traversal.
 
         Args:
-            session_id (str): ID a sanitizar.
+            session_id (Any): ID a sanitizar. Acepta cualquier tipo sin lanzar excepciones.
 
         Returns:
             str: ID seguro alfanumérico con guiones y guiones bajos.
         """
-        safe_id = re.sub(r"[^a-zA-Z0-9_\-]", "", session_id)
+        if session_id is None or not isinstance(session_id, (str, int, float)):
+            return uuid.uuid4().hex
+        safe_id = re.sub(r"[^a-zA-Z0-9_\-]", "", str(session_id))
         if not safe_id:
             safe_id = uuid.uuid4().hex
         return safe_id
@@ -448,8 +451,15 @@ class LocalChatHistoryManager(IChatHistoryManager):
             json_content (str): Contenido en formato JSON.
 
         Returns:
-            Optional[ChatSession]: Sesión importada o None si el JSON es inválido.
+            Optional[ChatSession]: Sesión importada o None si el JSON es inválido o excede el límite.
         """
+        if not json_content or not isinstance(json_content, str):
+            return None
+
+        if len(json_content) > self.MAX_IMPORT_SIZE:
+            print(f"[LocalChatHistoryManager] Payload de importación excede el límite máximo de {self.MAX_IMPORT_SIZE} bytes.")
+            return None
+
         try:
             data = json.loads(json_content)
             if not isinstance(data, dict):

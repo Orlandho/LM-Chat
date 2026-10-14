@@ -32,3 +32,4 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 python_files = ["test_*.py"]
 pythonpath = ["exts/orlandodorival.lm_chat", "."]
+addopts = "-ra --basetemp=.pytest_temp"
