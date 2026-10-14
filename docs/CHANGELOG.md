@@ -69,3 +69,42 @@ y este proyecto se adhiere a [Semantic Versioning (SemVer 2.0.0)](https://semver
 - Soporte para codificación UTF-8 en terminales de Windows 11 sin errores por emojis o caracteres multilingües.
 - Corrección de la aplicación de masa dinámica en PhysX (`UsdPhysics.MassAPI`).
 - Mocks aislados de Omniverse para ejecución multiplataforma sin depender del entorno 3D abierto.
+
+## v1.2.0 (2026-10-14)
+
+### Feat
+
+- **engine**: implement reasoning models, usd inspector, execution modes, turbo mode, and v1.1.0 release (#118)
+- **history**: implement local persistent chat history manager with GUI and CLI integration (#89)
+- **security**: add input validation and DoS protection to USDController (#58)
+- **versioning**: install professional automated SemVer release pipeline (#47)
+- **branding**: standardize commercial trademark LM-Chat and omni.lm_chat extension ID (#46)
+- **demo**: add autonomous industrial robotics manufacturing cell script (#45)
+- **usd_context**: implement StageContextSerializer for OpenUSD JSON spatial context (#43)
+- **mcp**: implement Omniverse MCP Client Registry (#42)
+- **ui**: implement primary native omni.ui chat GUI and MDV architecture (#41)
+- implement asynchronous multi-provider InferenceRouter and CLI Harness (#36)
+- **core**: introduce interface contracts for parallel Jules swarm execution (#37)
+- **infra**: add AGENTS.md, Jules CI suite with Omniverse mocks, and architecture diagram (#34)
+
+### Fix
+
+- **security**: validate URL scheme in NetworkClient to prevent SSRF and local file access
+- **security**: sanitize router inputs, validate URL schemes and strip CRLF (#57)
+- **ci**: adapt release pipeline push step for GitHub branch protection rules (#50)
+- **test**: eliminate race conditions and 10s artificial sleep in MCP tests (#49)
+- **cli**: enforce UTF-8 stream encoding for Windows consoles (#44)
+
+### Perf
+
+- **usd**: optimize OpenUSD stage hierarchy depth calculation and visibility lookup
+- **mcp**: break stdout reader loop on stream EOF in MCP server connection
+- **ci**: optimize workflow execution, add pip caching and path filters (#66)
+- **usd**: optimize USD context serialization and pre-compile regexes (#56)
+
+## v0.0.37 (2026-05-08)
+
+### Feat
+
+- implement self-healing loop for AI code generation in omniverse extension
+- Implement Omniverse Spatial Agent logic
