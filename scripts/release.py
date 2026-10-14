@@ -11,7 +11,12 @@ import re
 import argparse
 import datetime
 import subprocess
+import io
 from typing import Tuple, Dict, List
+
+if sys.platform == "win32":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
@@ -126,7 +131,7 @@ def update_target_files(new_version: str, dry_run: bool = False) -> None:
             print(f"[Dry Run] Actualizaría: {os.path.relpath(filepath, REPO_ROOT)}")
         else:
             write_file(filepath, updated)
-            print(f"[✓] Actualizado: {os.path.relpath(filepath, REPO_ROOT)} -> v{new_version}")
+            print(f"[OK] Actualizado: {os.path.relpath(filepath, REPO_ROOT)} -> v{new_version}")
 
 
 def update_changelog(new_version: str, dry_run: bool = False) -> None:
@@ -155,12 +160,12 @@ def update_changelog(new_version: str, dry_run: bool = False) -> None:
         print(f"[Dry Run] Añadiría sección v{new_version} a docs/CHANGELOG.md")
     else:
         write_file(changelog_path, updated_content)
-        print(f"[✓] docs/CHANGELOG.md actualizado con sección v{new_version}")
+        print(f"[OK] docs/CHANGELOG.md actualizado con sección v{new_version}")
 
 
-def run_git_operations(new_version: str) -> None:
+def run_git_operations(new_version: str, create_tag: bool = True) -> None:
     tag_name = f"v{new_version}"
-    commit_msg = f"bump: version {new_version}"
+    commit_msg = f"chore(release): bump version to {new_version}"
 
     files_to_stage = [
         "config/extension.toml",
@@ -172,11 +177,13 @@ def run_git_operations(new_version: str) -> None:
 
     subprocess.run(["git", "add"] + files_to_stage, cwd=REPO_ROOT, check=True)
     subprocess.run(["git", "commit", "-m", commit_msg], cwd=REPO_ROOT, check=True)
-    subprocess.run(["git", "tag", "-a", tag_name, "-m", f"Release {tag_name}"], cwd=REPO_ROOT, check=True)
-
-    print(f"\n[Éxito] Commit y Tag Git creados localmente: {tag_name}")
-    print("Para publicar el lanzamiento oficial a GitHub ejecuta:")
-    print(f"  git push origin main && git push origin {tag_name}\n")
+    if create_tag:
+        subprocess.run(["git", "tag", "-a", tag_name, "-m", f"Release {tag_name}"], cwd=REPO_ROOT, check=True)
+        print(f"\n[Éxito] Commit y Tag Git creados localmente: {tag_name}")
+        print("Para publicar el lanzamiento oficial a GitHub ejecuta:")
+        print(f"  git push origin main && git push origin {tag_name}\n")
+    else:
+        print(f"\n[Éxito] Commit Git creado localmente para v{new_version} (sin tag).")
 
 
 def main() -> None:
@@ -194,6 +201,11 @@ def main() -> None:
         "--dry-run",
         action="store_true",
         help="Simula el incremento sin modificar archivos ni crear commits en git",
+    )
+    parser.add_argument(
+        "--no-tag",
+        action="store_true",
+        help="Crea el commit de bump sin generar el git tag (útil para ramas de PR)",
     )
 
     args = parser.parse_args()
@@ -227,7 +239,7 @@ def main() -> None:
 
     if not args.dry_run:
         try:
-            run_git_operations(new_version)
+            run_git_operations(new_version, create_tag=not args.no_tag)
         except Exception as e:
             print(f"[Aviso Git]: No se pudo realizar el commit automático: {e}")
             print("Puedes confirmar los cambios manualmente con 'git add .' y 'git commit'.")
