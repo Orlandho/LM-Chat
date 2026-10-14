@@ -1,6 +1,6 @@
 [project]
 name = "omni-lm-chat"
-version = "1.1.0"
+version = "1.2.0"
 description = "LM-Chat™: Autonomous Spatial AI Assistant & Neural Copilot for NVIDIA Omniverse"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -32,3 +32,4 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 python_files = ["test_*.py"]
 pythonpath = ["exts/orlandodorival.lm_chat", "."]
+addopts = "-ra --basetemp=.pytest_temp"
