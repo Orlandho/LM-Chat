@@ -47,6 +47,10 @@ y este proyecto se adhiere a [Semantic Versioning (SemVer 2.0.0)](https://semver
 - Resiliencia en lectura de sesiones de historial ante bloqueos transitorios de archivos en Windows (`PermissionError [WinError 13]`).
 - Limpieza de corrutinas asíncronas huérfanas en cierre de ventana de ajustes.
 - Validación de esquemas URL no HTTP en cliente de red.
+- Aislamiento estricto del entorno de ejecución dinámica OpenUSD con enlace explícito de `__builtins__` en `USDController`.
+- Optimización de búsqueda de historial de chat a una sola pasada en disco y persistencia JSON compacta sin sobrecoste de formato.
+- Sanitización de rutas e identificadores de sesión en importación JSON previniendo directory traversal, con permisos restrictivos `0o600`/`0o700`.
+- Incorporación de botón para liberación de VRAM en LM Studio y selector de balanceo de carga para clústeres locales.
 
 ## [1.0.0] - 2026-09-14
 
