@@ -8,8 +8,40 @@ y este proyecto se adhiere a [Semantic Versioning (SemVer 2.0.0)](https://semver
 
 ## [1.1.0] - 2026-10-14
 
-### Cambios
-- Nueva versión comercial v1.1.0 sincronizada automáticamente para NVIDIA Omniverse Kit.
+### Añadido (Features)
+- **Soporte Nativo para Modelos de Razonamiento (Reasoning Models):**
+  - Detección automática mediante regex de modelos tipo o1, o3, DeepSeek R1 y Claude Thinking (`is_reasoning_model`).
+  - Adaptación transparente de payload (omisión de `temperature` y mapeo a `max_completion_tokens`).
+  - Parseo asíncrono en tiempo real de etiquetas `<think>...</think>` y campos nativos `reasoning_content`.
+  - Componente de interfaz colapsable `CollapsibleFrame` para visualizar el flujo de pensamiento sin saturar el chat.
+  - Aislamiento de seguridad: el extractor de código ReAct ignora estrictamente bloques dentro de `<think>`.
+- **Inspección y Edición Avanzada de OpenUSD:**
+  - `USDInspector` (`IUSDInspector`): auditoría automática de texturas y referencias rotas (`audit_missing_assets`), consulta jerárquica por tipo, ruta o atributo (`find_prims_by_query`), y estado de la pila de capas (`get_layer_stack_status`).
+  - `USDController` (`IUSDController`): transformaciones 3D matriciales (`transform_prim`), enlace de materiales MDL (`bind_material`), y agrupación jerárquica de prims (`group_prims`).
+  - Transacciones atómicas de mutación USD encapsuladas en `omni.kit.undo` con soporte total para `Ctrl+Z` y `Ctrl+Y`.
+- **Modos Duales de Ejecución (Inmediato vs Planificación y Confirmación):**
+  - Selector interactivo en cabecera de chat: ⚡ Inmediato vs 📝 Plan.
+  - Generación de tarjetas estructuradas de previsualización de cambios USD (`PlanCard`) con botones de acción `[✓ Ejecutar en Stage]` y `[✕ Cancelar]`.
+  - Verificación previa del Stage antes de cualquier mutación destructiva.
+- **Políticas de Seguridad Espacial (Spatial Security Policies):**
+  - `SpatialSecurityPolicy` (`IAgentPolicy`): análisis estático de código Python mediante AST.
+  - Bloqueo preventivo de módulos peligrosos (`subprocess`, `socket`, `shutil`, `pty`, etc.).
+  - Límites de iteración para bucles `for` y `while` previniendo cuelgues del bucle de renderizado a 60 FPS.
+  - Protección de rutas críticas reservadas del escenario (`/OmniverseKit_Root`, `/Render`, etc.).
+- **Modo Turbo & Arquitectura de Herramientas MCP:**
+  - Micro-lotes de tokens streaming en bucle asíncrono para maximizar rendimiento sin bloquear el renderizado Kit a 60 FPS.
+  - Registro dinámico y configuración de servidores Model Context Protocol (`MCPServerConfig`).
+- **Ventana de Ajustes Multi-Proveedor y Diagnóstico Avanzado:**
+  - Ventana modal `SettingsWindow` para configuración de credenciales y endpoints (LM Studio, Ollama, Gemini, OpenAI, Claude).
+  - Descubrimiento dinámico de modelos en caliente (`fetch_remote_models`).
+  - Motor de diagnósticos inteligentes (`DiagnosticsEngine`) y registro circular estructurado (`LMStructuredLogger`).
+- **Alineación de Catálogo Octubre 2026:**
+  - Integración de Gemini 3.8 / 3.7 Flash, Claude Opus 5.5 / Sonnet 5.5, OpenAI GPT-6 Astra / Sol, DeepSeek V4 / R1, Llama 4, Qwen 3.6 y Nemotron 3.5.
+
+### Corregido (Fixes)
+- Resiliencia en lectura de sesiones de historial ante bloqueos transitorios de archivos en Windows (`PermissionError [WinError 13]`).
+- Limpieza de corrutinas asíncronas huérfanas en cierre de ventana de ajustes.
+- Validación de esquemas URL no HTTP en cliente de red.
 
 ## [1.0.0] - 2026-09-14
 
