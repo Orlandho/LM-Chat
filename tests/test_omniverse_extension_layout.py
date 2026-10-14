@@ -116,3 +116,12 @@ class TestOmniverseExtensionLayout(unittest.TestCase):
         from scripts.release import check_version_sanity
         version = check_version_sanity()
         self.assertTrue(re.match(r"^\d+\.\d+\.\d+", version), f"Versión inválida: {version}")
+
+    def test_citation_metadata_integrity(self):
+        """Verifica que CITATION.cff contenga los metadatos de autoría personal de Orlando Dorival sin afiliaciones indebidas."""
+        cff_path = os.path.join(REPO_ROOT, "CITATION.cff")
+        with open(cff_path, "r", encoding="utf-8") as f:
+            cff_text = f.read()
+        self.assertIn("Orlando Jesús", cff_text)
+        self.assertIn("Dorival Castañeda", cff_text)
+        self.assertNotIn("Universidad", cff_text, "El proyecto LM-Chat es 100% personal e independiente")
