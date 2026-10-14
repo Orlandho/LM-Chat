@@ -3,7 +3,6 @@ message: "Si utilizas este software, por favor cítalo utilizando estos metadato
 authors:
   - family-names: "Dorival Castañeda"
     given-names: "Orlando Jesús"
-    affiliation: "Universidad Privada del Norte"
     orcid: "https://orcid.org/0009-0007-4312-108X"
 title: "LM-Chat™: Autonomous Spatial AI Assistant & Copilot for NVIDIA Omniverse"
 abstract: >-
