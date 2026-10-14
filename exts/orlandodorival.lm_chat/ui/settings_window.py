@@ -13,7 +13,7 @@ import asyncio
 from typing import Optional, Callable, Dict, Any, List
 import omni.ui as ui
 
-from core.interfaces import ISettingsManager
+from core.interfaces import ISettingsManager, ClusterFailoverStrategy
 from logic.settings_manager import SettingsManager
 from logic.logger import get_logger
 
@@ -47,11 +47,23 @@ class SettingsWindow:
         self._selected_model = self._settings_manager.get_default_model(self._selected_provider)
         self._is_default_provider = True
         self._discover_task: Optional[Any] = None
+        self._vram_task: Optional[Any] = None
+        self._cluster_health_task: Optional[Any] = None
+
+        self._unload_vram_btn: Optional[ui.Button] = None
+        self._vram_status_label: Optional[ui.Label] = None
+        self._cluster_strategy_combo: Optional[ui.ComboBox] = None
+        self._cluster_health_btn: Optional[ui.Button] = None
+        self._cluster_health_status_label: Optional[ui.Label] = None
+        self._cluster_nodes_frame: Optional[ui.Frame] = None
+
+        cluster_cfg = self._settings_manager.get_provider_config("Local Cluster")
+        self._selected_cluster_strategy = cluster_cfg.get("cluster_strategy", ClusterFailoverStrategy.PRIORITY.value)
 
         self._window = ui.Window(
             "LM-Chat - Configuración de Servicios y Modelos",
-            width=650,
-            height=580,
+            width=680,
+            height=620,
             visible=True,
         )
 
@@ -72,6 +84,11 @@ class SettingsWindow:
         """Modelo actualmente seleccionado."""
         return self._selected_model
 
+    @property
+    def selected_cluster_strategy(self) -> str:
+        """Estrategia de balanceo de clúster actualmente seleccionada."""
+        return getattr(self, "_selected_cluster_strategy", ClusterFailoverStrategy.PRIORITY.value)
+
     def show(self) -> None:
         """Muestra y enfoca la ventana de configuración."""
         if self._window:
@@ -86,6 +103,10 @@ class SettingsWindow:
         """Destruye los recursos de la ventana."""
         if hasattr(self, "_discover_task") and self._discover_task and not self._discover_task.done():
             self._discover_task.cancel()
+        if hasattr(self, "_vram_task") and self._vram_task and not self._vram_task.done():
+            self._vram_task.cancel()
+        if hasattr(self, "_cluster_health_task") and self._cluster_health_task and not self._cluster_health_task.done():
+            self._cluster_health_task.cancel()
         if self._window:
             self._window.destroy()
             self._window = None
@@ -256,6 +277,10 @@ class SettingsWindow:
 
                     ui.Rectangle(height=1, style={"background_color": 0xFF444444})
 
+                    # --- Herramientas Específicas del Proveedor (LM Studio VRAM / Cluster Balancing) ---
+                    self._provider_extra_frame = ui.Frame(width=ui.Fraction(1))
+                    self._rebuild_provider_extra_controls()
+
                     # --- Barra Inferior de Acciones ---
                     with ui.HStack(height=36, spacing=10):
                         self._save_btn = ui.Button(
@@ -336,6 +361,172 @@ class SettingsWindow:
                             clicked_fn=_make_apply_fn(target_url),
                         )
 
+    def _rebuild_provider_extra_controls(self) -> None:
+        """Reconstruye controles específicos según el proveedor (LM Studio VRAM, Local Cluster, etc.)."""
+        if not hasattr(self, "_provider_extra_frame") or not self._provider_extra_frame:
+            return
+
+        self._provider_extra_frame.clear()
+        self._unload_vram_btn = None
+        self._vram_status_label = None
+        self._cluster_strategy_combo = None
+        self._cluster_health_btn = None
+        self._cluster_health_status_label = None
+        self._cluster_nodes_frame = None
+
+        if self._selected_provider == "LM Studio":
+            with self._provider_extra_frame:
+                with ui.VStack(spacing=8):
+                    ui.Label(
+                        "6. Control de VRAM GPU & Viewport RTX (LM Studio):",
+                        style={"font_size": 13, "font_weight": "bold", "color": 0xFFE0E0E0},
+                    )
+                    ui.Label(
+                        "Descarga todos los modelos cargados en LM Studio para liberar memoria VRAM para el renderizador RTX de Omniverse.",
+                        style={"font_size": 11, "color": 0xFFAAAAAA},
+                    )
+                    with ui.HStack(height=32, spacing=10):
+                        self._unload_vram_btn = ui.Button(
+                            "🧹 Liberar VRAM",
+                            width=160,
+                            height=30,
+                            style={"background_color": 0xFFB71C1C, "border_radius": 4, "font_size": 11, "font_weight": "bold"},
+                            clicked_fn=self._on_unload_vram_clicked,
+                        )
+                        self._vram_status_label = ui.Label(
+                            "",
+                            style={"font_size": 11, "font_weight": "bold"},
+                            width=ui.Fraction(1),
+                        )
+                    ui.Rectangle(height=1, style={"background_color": 0xFF444444})
+
+        elif self._selected_provider == "Local Cluster":
+            curr_cfg = self._settings_manager.get_provider_config("Local Cluster")
+            saved_strat = curr_cfg.get("cluster_strategy", ClusterFailoverStrategy.PRIORITY.value)
+            self._selected_cluster_strategy = saved_strat
+
+            strategy_options = [
+                ("Priority (Conmutación por error instantánea)", ClusterFailoverStrategy.PRIORITY.value),
+                ("Round-Robin (Balanceo rotativo equitativo)", ClusterFailoverStrategy.ROUND_ROBIN.value),
+                ("Lowest-Latency (Menor latencia de red)", ClusterFailoverStrategy.LOWEST_LATENCY.value),
+            ]
+            active_idx = 0
+            for idx, (_, strat_val) in enumerate(strategy_options):
+                if strat_val == saved_strat:
+                    active_idx = idx
+                    break
+
+            with self._provider_extra_frame:
+                with ui.VStack(spacing=8):
+                    ui.Label(
+                        "6. Configuración de Balanceo y Clúster Distribuido:",
+                        style={"font_size": 13, "font_weight": "bold", "color": 0xFFE0E0E0},
+                    )
+                    ui.Label(
+                        "Administra la estrategia de tolerancia a fallos y verifica la salud de los nodos de inferencia en LAN/DGX.",
+                        style={"font_size": 11, "color": 0xFFAAAAAA},
+                    )
+                    with ui.HStack(height=28, spacing=8):
+                        ui.Label("Estrategia de Failover:", width=150, style={"color": 0xFFCCCCCC, "font_size": 12})
+                        display_strats = [opt[0] for opt in strategy_options]
+                        self._cluster_strategy_combo = ui.ComboBox(
+                            active_idx,
+                            *display_strats,
+                            width=300,
+                            height=28,
+                        )
+                        self._cluster_strategy_combo.model.add_item_changed_fn(self._on_cluster_strategy_changed)
+
+                    with ui.HStack(height=32, spacing=10):
+                        self._cluster_health_btn = ui.Button(
+                            "🏥 Probar Salud del Clúster",
+                            width=190,
+                            height=30,
+                            style={"background_color": 0xFF007ACC, "border_radius": 4, "font_size": 11, "font_weight": "bold"},
+                            clicked_fn=self._on_cluster_health_check_clicked,
+                        )
+                        self._cluster_health_status_label = ui.Label(
+                            "",
+                            style={"font_size": 11, "font_weight": "bold"},
+                            width=ui.Fraction(1),
+                        )
+
+                    # Visualización de los nodos del clúster
+                    self._cluster_nodes_frame = ui.Frame(width=ui.Fraction(1))
+                    self._rebuild_cluster_nodes_view()
+
+                    ui.Rectangle(height=1, style={"background_color": 0xFF444444})
+
+    def _rebuild_cluster_nodes_view(self, cluster_mgr: Optional[Any] = None) -> None:
+        """Visualiza los nodos del clúster con sus estados de salud y latencia en tiempo real."""
+        if not hasattr(self, "_cluster_nodes_frame") or not self._cluster_nodes_frame:
+            return
+
+        nodes = []
+        try:
+            if cluster_mgr is None:
+                if hasattr(self._settings_manager, "get_cluster_manager"):
+                    cluster_mgr = self._settings_manager.get_cluster_manager()
+                if cluster_mgr is None:
+                    from logic.cluster_manager import ClusterManager
+                    p_cfg = self._settings_manager.get_provider_config("Local Cluster")
+                    cluster_mgr = ClusterManager.from_dict({
+                        "strategy": p_cfg.get("cluster_strategy", "priority"),
+                        "nodes": p_cfg.get("cluster_nodes", []),
+                        "health_check_timeout": 3.0,
+                    })
+            if cluster_mgr and hasattr(cluster_mgr, "get_nodes"):
+                nodes = cluster_mgr.get_nodes()
+        except Exception as e:
+            logger.warning(f"No se pudieron obtener nodos del clúster: {e}")
+            nodes = []
+
+        self._cluster_nodes_frame.clear()
+        with self._cluster_nodes_frame:
+            with ui.VStack(spacing=4):
+                ui.Label(
+                    "Nodos configurados en el clúster:",
+                    style={"font_size": 11, "font_weight": "bold", "color": 0xFF00B4D8},
+                )
+                if not nodes:
+                    ui.Label(
+                        "(Sin nodos registrados)",
+                        style={"font_size": 11, "color": 0xFF888888},
+                    )
+                else:
+                    for node in nodes:
+                        with ui.HStack(height=24, spacing=8):
+                            is_healthy = getattr(node, "is_healthy", True)
+                            status_dot = "🟢" if is_healthy else "🔴"
+                            status_text = "Saludable" if is_healthy else "Inaccesible"
+                            status_color = 0xFF4CAF50 if is_healthy else 0xFFE53935
+                            ui.Label(
+                                f"{status_dot} {getattr(node, 'name', 'Nodo')}",
+                                width=160,
+                                style={"color": 0xFFE0E0E0, "font_size": 11, "font_weight": "bold"},
+                            )
+                            ui.Label(
+                                getattr(node, "url", ""),
+                                width=ui.Fraction(1),
+                                style={"color": 0xFFAAAAAA, "font_size": 11},
+                            )
+                            lat = getattr(node, "last_latency_ms", 0.0)
+                            try:
+                                lat_val = float(lat) if lat is not None else 0.0
+                                latency_str = f"{lat_val:.1f} ms" if lat_val > 0 else "-"
+                            except (ValueError, TypeError):
+                                latency_str = "-"
+                            ui.Label(
+                                latency_str,
+                                width=65,
+                                style={"color": 0xFF00B4D8, "font_size": 11},
+                            )
+                            ui.Label(
+                                status_text,
+                                width=90,
+                                style={"color": status_color, "font_size": 11},
+                            )
+
     # --- Callbacks y Manejadores de Eventos ---
 
     def _on_provider_changed(self, item_model, item) -> None:
@@ -368,9 +559,10 @@ class SettingsWindow:
                 if hasattr(self, "_test_status_label"):
                     self._test_status_label.text = ""
 
-                # Reconstruir combos y presets
+                # Reconstruir combos, presets y controles específicos
                 self._rebuild_model_combo()
                 self._rebuild_presets_buttons()
+                self._rebuild_provider_extra_controls()
         except Exception as e:
             print(f"[SettingsWindow] Error al cambiar proveedor: {e}")
 
@@ -457,15 +649,21 @@ class SettingsWindow:
                 except ValueError:
                     pass
 
+            update_kwargs: Dict[str, Any] = {
+                "base_url": url_val if url_val else None,
+                "api_key": key_val,
+                "default_model": self._selected_model,
+                "temperature": temp_val,
+                "timeout": timeout_val,
+                "max_tokens": max_tokens_val,
+            }
+            if self._selected_provider == "Local Cluster" and hasattr(self, "_selected_cluster_strategy"):
+                update_kwargs["cluster_strategy"] = self._selected_cluster_strategy
+
             # Actualizar configuración del proveedor activo
             self._settings_manager.update_provider_config(
                 self._selected_provider,
-                base_url=url_val if url_val else None,
-                api_key=key_val,
-                default_model=self._selected_model,
-                temperature=temp_val,
-                timeout=timeout_val,
-                max_tokens=max_tokens_val,
+                **update_kwargs,
             )
 
             # Sincronizar modelo por defecto y establecer proveedor predeterminado
@@ -528,4 +726,162 @@ class SettingsWindow:
         except Exception as e:
             if hasattr(self, "_discover_status_label") and self._discover_status_label:
                 self._discover_status_label.text = f"Fallo al descubrir: {e}"
+
+    def _on_unload_vram_clicked(self) -> None:
+        """Invoca asíncronamente la liberación de VRAM en LM Studio para el Viewport RTX."""
+        if hasattr(self, "_vram_task") and self._vram_task and not self._vram_task.done():
+            logger.info("Tarea de liberación de VRAM ya en ejecución. Ignorando clic duplicado.")
+            return
+
+        if hasattr(self, "_unload_vram_btn") and self._unload_vram_btn:
+            self._unload_vram_btn.enabled = False
+
+        if hasattr(self, "_vram_status_label") and self._vram_status_label:
+            self._vram_status_label.text = "Liberando VRAM en LM Studio..."
+            self._vram_status_label.style = {"color": 0xFF00B4D8, "font_size": 11}
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_closed():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            self._vram_task = loop.create_task(self._run_async_unload_vram())
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            self._vram_task = loop.create_task(self._run_async_unload_vram())
+
+    async def _run_async_unload_vram(self) -> Dict[str, Any]:
+        """Tarea asíncrona que ejecuta unload_all_models() de LMStudioVRAMManager."""
+        try:
+            vram_mgr = None
+            if hasattr(self._settings_manager, "get_lm_studio_vram_manager"):
+                vram_mgr = self._settings_manager.get_lm_studio_vram_manager()
+            if vram_mgr is None:
+                from logic.lm_studio_vram import LMStudioVRAMManager
+                p_cfg = self._settings_manager.get_provider_config("LM Studio")
+                vram_mgr = LMStudioVRAMManager(
+                    base_url=p_cfg.get("base_url", "http://localhost:1234"),
+                    api_key=self._settings_manager.get_effective_api_key("LM Studio"),
+                )
+
+            res = await vram_mgr.unload_all_models()
+
+            if not self._window:
+                return res
+
+            if self._selected_provider == "LM Studio" and hasattr(self, "_vram_status_label") and self._vram_status_label:
+                if res.get("success"):
+                    unloaded = res.get("unloaded_instances", [])
+                    if unloaded:
+                        self._vram_status_label.text = f"✓ {len(unloaded)} modelo(s) descargado(s). VRAM libre para RTX."
+                    else:
+                        self._vram_status_label.text = "✓ VRAM ya libre (sin modelos cargados en LM Studio)."
+                    self._vram_status_label.style = {"color": 0xFF4CAF50, "font_size": 11, "font_weight": "bold"}
+                else:
+                    errors = res.get("errors") or "Fallo al descargar modelos"
+                    self._vram_status_label.text = f"✗ Error liberando VRAM: {errors}"
+                    self._vram_status_label.style = {"color": 0xFFE53935, "font_size": 11}
+            return res
+        except Exception as e:
+            logger.error(f"Error en descarga de modelos VRAM: {e}")
+            if self._window and self._selected_provider == "LM Studio" and hasattr(self, "_vram_status_label") and self._vram_status_label:
+                self._vram_status_label.text = f"✗ Error liberando VRAM: {e}"
+                self._vram_status_label.style = {"color": 0xFFE53935, "font_size": 11}
+            return {"success": False, "error": str(e)}
+        finally:
+            if hasattr(self, "_unload_vram_btn") and self._unload_vram_btn:
+                self._unload_vram_btn.enabled = True
+
+    def _on_cluster_strategy_changed(self, item_model, item=None) -> None:
+        """Maneja el cambio de estrategia de conmutación por error en el clúster."""
+        try:
+            val_idx = item_model.get_item_value_model().as_int
+            strategies = [
+                ClusterFailoverStrategy.PRIORITY.value,
+                ClusterFailoverStrategy.ROUND_ROBIN.value,
+                ClusterFailoverStrategy.LOWEST_LATENCY.value,
+            ]
+            if 0 <= val_idx < len(strategies):
+                self._selected_cluster_strategy = strategies[val_idx]
+                self._settings_manager.update_provider_config(
+                    "Local Cluster",
+                    cluster_strategy=self._selected_cluster_strategy,
+                )
+                if hasattr(self, "_cluster_health_status_label") and self._cluster_health_status_label:
+                    self._cluster_health_status_label.text = f"Estrategia fijada a '{self._selected_cluster_strategy}'"
+                    self._cluster_health_status_label.style = {"color": 0xFF00B4D8, "font_size": 11}
+        except Exception as e:
+            logger.warning(f"Error al cambiar estrategia de cluster: {e}")
+
+    def _on_cluster_health_check_clicked(self) -> None:
+        """Inicia la prueba asíncrona de salud de todos los nodos del clúster."""
+        if hasattr(self, "_cluster_health_task") and self._cluster_health_task and not self._cluster_health_task.done():
+            logger.info("Sondeo de salud del clúster ya en ejecución. Ignorando clic duplicado.")
+            return
+
+        if hasattr(self, "_cluster_health_btn") and self._cluster_health_btn:
+            self._cluster_health_btn.enabled = False
+
+        if hasattr(self, "_cluster_health_status_label") and self._cluster_health_status_label:
+            self._cluster_health_status_label.text = "Sondeando nodos del clúster..."
+            self._cluster_health_status_label.style = {"color": 0xFF00B4D8, "font_size": 11}
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_closed():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            self._cluster_health_task = loop.create_task(self._run_async_cluster_health_check())
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            self._cluster_health_task = loop.create_task(self._run_async_cluster_health_check())
+
+    async def _run_async_cluster_health_check(self) -> Dict[str, bool]:
+        """Tarea asíncrona que invoca check_health_all() en ClusterManager."""
+        try:
+            cluster_mgr = None
+            if hasattr(self._settings_manager, "get_cluster_manager"):
+                cluster_mgr = self._settings_manager.get_cluster_manager()
+            if cluster_mgr is None:
+                from logic.cluster_manager import ClusterManager
+                p_cfg = self._settings_manager.get_provider_config("Local Cluster")
+                cluster_mgr = ClusterManager.from_dict({
+                    "strategy": p_cfg.get("cluster_strategy", "priority"),
+                    "nodes": p_cfg.get("cluster_nodes", []),
+                    "health_check_timeout": 3.0,
+                })
+
+            results = await cluster_mgr.check_health_all()
+
+            if not self._window:
+                return results
+
+            healthy_count = sum(1 for v in results.values() if v)
+            total = len(results)
+            if self._selected_provider == "Local Cluster" and hasattr(self, "_cluster_health_status_label") and self._cluster_health_status_label:
+                if total == 0:
+                    self._cluster_health_status_label.text = "Sin nodos configurados en el clúster."
+                    self._cluster_health_status_label.style = {"color": 0xFFAAAAAA, "font_size": 11}
+                elif healthy_count == total:
+                    self._cluster_health_status_label.text = f"✓ Todos los nodos operativos ({healthy_count}/{total})"
+                    self._cluster_health_status_label.style = {"color": 0xFF4CAF50, "font_size": 11, "font_weight": "bold"}
+                else:
+                    self._cluster_health_status_label.text = f"⚠ Nodos saludables: {healthy_count}/{total}"
+                    self._cluster_health_status_label.style = {"color": 0xFFFFA000, "font_size": 11, "font_weight": "bold"}
+
+            if self._selected_provider == "Local Cluster":
+                self._rebuild_cluster_nodes_view(cluster_mgr)
+            return results
+        except Exception as e:
+            logger.error(f"Error al verificar salud del clúster: {e}")
+            if self._window and self._selected_provider == "Local Cluster" and hasattr(self, "_cluster_health_status_label") and self._cluster_health_status_label:
+                self._cluster_health_status_label.text = f"✗ Error sondeo clúster: {e}"
+                self._cluster_health_status_label.style = {"color": 0xFFE53935, "font_size": 11}
+            return {}
+        finally:
+            if hasattr(self, "_cluster_health_btn") and self._cluster_health_btn:
+                self._cluster_health_btn.enabled = True
+
 

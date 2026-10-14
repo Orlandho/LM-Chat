@@ -424,6 +424,31 @@ class ISettingsManager(ABC):
         """Elimina la configuración persistente de un servidor MCP."""
         return False
 
+    def get_presets(self, provider_name: str) -> List[Dict[str, str]]:
+        """Retorna los presets de conexión para un proveedor."""
+        return []
+
+    def add_custom_model(self, provider_name: str, model_name: str) -> None:
+        """Agrega un modelo personalizado para un proveedor."""
+        pass
+
+    async def test_connection(
+        self,
+        provider_name: str,
+        base_url: Optional[str] = None,
+        api_key: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Prueba la conectividad con el endpoint del proveedor."""
+        return {"success": False, "message": "No implementado"}
+
+    def get_cluster_manager(self) -> Any:
+        """Instancia y retorna un ClusterManager configurado con los nodos y estrategia del cluster."""
+        return None
+
+    def get_lm_studio_vram_manager(self) -> Any:
+        """Instancia y retorna un LMStudioVRAMManager para gestión de memoria GPU."""
+        return None
+
 
 class ClusterFailoverStrategy(str, Enum):
     """Estrategias de enrutamiento y conmutación por error en clusters de inferencia."""
