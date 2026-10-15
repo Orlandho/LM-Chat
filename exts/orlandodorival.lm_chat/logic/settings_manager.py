@@ -10,7 +10,7 @@ parámetros de inferencia (temperatura, timeout, max_tokens) con presets de 1 cl
 
 Integra modelos contemporáneos y emergentes (OpenAI GPT-4o / o3-mini / GPT-4.5,
 Claude 3.7 Sonnet / 3.5 Haiku, NVIDIA NIM Nemotron-70B, Ollama / LM Studio
-con DeepSeek-R1 y Qwen 2.5 Coder, Gemini 2.0 Flash) y diagnósticos avanzados de conectividad.
+con DeepSeek-R1 y Qwen 2.5 Coder, Gemini 3.8 Flash) y diagnósticos avanzados de conectividad.
 """
 
 import os

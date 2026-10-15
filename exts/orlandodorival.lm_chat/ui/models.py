@@ -35,10 +35,10 @@ class ChatModel:
         "OpenAI API": ["gpt-4o", "gpt-4o-mini", "o3-mini", "o1", "o1-mini", "gpt-4.5-preview", "gpt-4-turbo"],
         "Claude API": ["claude-3-7-sonnet-latest", "claude-3-5-sonnet-latest", "claude-3-5-haiku-latest", "claude-3-5-opus-latest", "claude-3-opus-latest"],
         "NVIDIA Spark": ["nvidia/llama-3.1-nemotron-70b-instruct", "meta/llama-3.1-70b-instruct", "meta/llama-3.1-405b-instruct", "nvidia/nemotron-4-340b-instruct", "mistralai/mixtral-8x22b-instruct-v0.1", "deepseek-ai/deepseek-r1"],
-        "Google Gemini API": ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"],
+        "Google Gemini API": ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.5-flash", "gemini-3.1-pro", "gemini-2.5-pro"],
         "vLLM": ["meta-llama/Meta-Llama-3-8B-Instruct", "Qwen/Qwen2.5-Coder-32B-Instruct"],
         "Nemotron": ["nvidia/nemotron-4-340b-instruct"],
-        "Cloud APIs": ["gpt-4o", "claude-3-7-sonnet-latest", "claude-3-5-sonnet-latest", "gemini-2.0-flash"],
+        "Cloud APIs": ["gpt-4o", "claude-3-7-sonnet-latest", "claude-3-5-sonnet-latest", "gemini-3.8-flash"],
     }
 
     def __init__(

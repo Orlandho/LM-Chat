@@ -205,10 +205,10 @@ class InferenceRouter:
         "nvidia_spark": "nvidia/llama-3.1-nemotron-70b-instruct",
         "nvidia spark": "nvidia/llama-3.1-nemotron-70b-instruct",
         "nemotron": "nvidia/nemotron-4-340b-instruct",
-        "gemini": "gemini-2.0-flash",
-        "google": "gemini-2.0-flash",
-        "google gemini": "gemini-2.0-flash",
-        "google gemini api": "gemini-2.0-flash",
+        "gemini": "gemini-3.8-flash",
+        "google": "gemini-3.8-flash",
+        "google gemini": "gemini-3.8-flash",
+        "google gemini api": "gemini-3.8-flash",
         "cluster": "deepseek-v4",
     }
 
@@ -500,7 +500,7 @@ class InferenceRouter:
             elif can_p == "nvidia_spark":
                 effective_key = os.getenv("NVIDIA_API_KEY")
             elif can_p == "gemini":
-                effective_key = os.getenv("GEMINI_API_KEY")
+                effective_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
             elif can_p == "cloud":
                 effective_key = os.getenv("OPENAI_API_KEY")
 
