@@ -371,7 +371,10 @@ class SettingsManager(ISettingsManager):
 
         env_key_var = cfg.get("env_key")
         if env_key_var:
-            return os.getenv(env_key_var, "").strip() or None
+            val = os.getenv(env_key_var, "").strip()
+            if not val and env_key_var == "GEMINI_API_KEY":
+                val = os.getenv("GOOGLE_API_KEY", "").strip()
+            return val or None
         return None
 
     def get_presets(self, provider_name: str) -> List[Dict[str, str]]:
@@ -679,8 +682,10 @@ class SettingsManager(ISettingsManager):
                             for item in items:
                                 if isinstance(item, dict):
                                     mid = item.get("id") or item.get("name")
-                                    if mid and mid not in discovered_models:
-                                        discovered_models.append(mid)
+                                    if mid:
+                                        clean_mid = mid[7:] if mid.startswith("models/") else mid
+                                        if clean_mid and clean_mid not in discovered_models:
+                                            discovered_models.append(clean_mid)
 
         except Exception as e:
             logger.warning(f"Error descubriendo modelos en vivo para {provider_name}: {e}")
