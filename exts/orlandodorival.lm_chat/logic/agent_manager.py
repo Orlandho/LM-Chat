@@ -296,8 +296,8 @@ class AgentManager:
                         choices = data.get("choices", [{}])
                         if choices:
                             delta = choices[0].get("delta", {})
-                            content_chunk = delta.get("content", "")
-                            reasoning_chunk = delta.get("reasoning_content", "")
+                            content_chunk = delta.get("content") or ""
+                            reasoning_chunk = delta.get("reasoning_content") or delta.get("thought") or delta.get("reasoning") or ""
                             delta_tool_calls = delta.get("tool_calls", [])
 
                             # Acumular tool_calls en streaming
@@ -326,13 +326,19 @@ class AgentManager:
                             if reasoning_chunk:
                                 full_reasoning += reasoning_chunk
                                 if reasoning_callback:
-                                    reasoning_callback(reasoning_chunk)
+                                    try:
+                                        reasoning_callback(reasoning_chunk)
+                                    except Exception as cb_err:
+                                        logger.debug(f"Excepción en reasoning_callback: {cb_err}")
 
                             # Enviar tokens de respuesta final al chat principal
                             if content_chunk:
                                 full_content += content_chunk
                                 if append_callback:
-                                    append_callback(content_chunk)
+                                    try:
+                                        append_callback(content_chunk)
+                                    except Exception as cb_err:
+                                        logger.debug(f"Excepción en append_callback: {cb_err}")
                     else:
                         error_occurred = True
                         error_type = chunk_obj.get("error_type")
@@ -358,7 +364,10 @@ class AgentManager:
                 if error_occurred:
                     logger.error(f"Inferencia abortada por error en el proveedor {self._router.provider}")
                     if append_callback:
-                        append_callback(error_message)
+                        try:
+                            append_callback(error_message)
+                        except Exception as cb_err:
+                            logger.debug(f"Excepción en append_callback de error: {cb_err}")
                     return error_message
 
                 # Wait briefly for UI refresh
@@ -499,7 +508,10 @@ class AgentManager:
                 )
                 diag_md = diag.to_markdown()
                 if append_callback:
-                    append_callback(diag_md)
+                    try:
+                        append_callback(diag_md)
+                    except Exception as cb_err:
+                        logger.debug(f"Excepción en append_callback de diagnóstico: {cb_err}")
                 return diag_md
 
         return "Flujo finalizado inesperadamente."

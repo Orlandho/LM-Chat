@@ -63,7 +63,19 @@ def parse_arguments() -> argparse.Namespace:
         "--provider",
         type=str,
         default="lm_studio",
-        choices=["lm_studio", "ollama", "vllm", "cloud", "openai", "claude", "nvidia_spark"],
+        choices=[
+            "lm_studio",
+            "ollama",
+            "vllm",
+            "cloud",
+            "openai",
+            "claude",
+            "gemini",
+            "google",
+            "nvidia_spark",
+            "cluster",
+            "local_cluster",
+        ],
         help="Inference provider (default: lm_studio)",
     )
 
@@ -168,7 +180,10 @@ class LMChatCLI:
                     mod = loaded.metadata.get("model")
                     if prov:
                         norm_prov = prov.lower().replace(" ", "_").replace("apis", "").replace("api", "").strip("_")
-                        if norm_prov in ["lm_studio", "ollama", "vllm", "cloud"]:
+                        if norm_prov in [
+                            "lm_studio", "ollama", "vllm", "cloud", "openai", "claude",
+                            "gemini", "google", "nvidia_spark", "cluster", "local_cluster"
+                        ]:
                             self.router.set_provider(provider=norm_prov, model=mod)
 
         if not self.current_session:
@@ -301,7 +316,10 @@ class LMChatCLI:
             mod = loaded.metadata.get("model")
             if prov:
                 norm_prov = prov.lower().replace(" ", "_").replace("apis", "").replace("api", "").strip("_")
-                if norm_prov in ["lm_studio", "ollama", "vllm", "cloud"]:
+                if norm_prov in [
+                    "lm_studio", "ollama", "vllm", "cloud", "openai", "claude",
+                    "gemini", "google", "nvidia_spark", "cluster", "local_cluster"
+                ]:
                     self.router.set_provider(provider=norm_prov, model=mod)
 
         print(f"\n[CLI] Sesión cargada: '{loaded.title}' (ID: {loaded.session_id[:8]}, {len(loaded.messages)} msgs)\n")
@@ -380,16 +398,29 @@ class LMChatCLI:
                 choices = data.get("choices", [{}])
                 if choices:
                     delta = choices[0].get("delta", {})
-                    content = delta.get("content", "")
+                    content = delta.get("content") or ""
+                    reasoning = delta.get("reasoning_content") or delta.get("thought") or ""
+                    if reasoning:
+                        try:
+                            sys.stdout.write(reasoning)
+                            sys.stdout.flush()
+                        except Exception:
+                            pass
                     if content:
                         full_content += content
-                        sys.stdout.write(content)
-                        sys.stdout.flush()
+                        try:
+                            sys.stdout.write(content)
+                            sys.stdout.flush()
+                        except Exception:
+                            pass
             else:
                 error_occurred = True
                 err_msg = chunk_obj.get("message", "Error desconocido")
-                sys.stdout.write(f"\n\n[Error de Inferencia]: {err_msg}\n")
-                sys.stdout.flush()
+                try:
+                    sys.stdout.write(f"\n\n[Error de Inferencia]: {err_msg}\n")
+                    sys.stdout.flush()
+                except Exception:
+                    pass
                 break
 
         sys.stdout.write("\n")
@@ -472,8 +503,12 @@ class LMChatCLI:
                         else:
                             print("\n[Error] Especifica el número [#] o ID de la sesión a eliminar.\n")
                     elif command in ["/switch", "/provider"]:
-                        if arg in ["lm_studio", "ollama", "vllm", "cloud"]:
-                            self.router.set_provider(provider=arg)
+                        supported_switches = [
+                            "lm_studio", "ollama", "vllm", "cloud", "openai", "claude",
+                            "gemini", "google", "nvidia_spark", "cluster", "local_cluster"
+                        ]
+                        if arg.lower() in supported_switches:
+                            self.router.set_provider(provider=arg.lower())
                             if self.current_session:
                                 if not self.current_session.metadata:
                                     self.current_session.metadata = {}
@@ -483,7 +518,7 @@ class LMChatCLI:
                             print(f"\n[CLI] Proveedor cambiado a: {arg.upper()}")
                             self.print_status()
                         else:
-                            print(f"\n[Error] Proveedor inválido '{arg}'. Opciones: lm_studio, ollama, vllm, cloud\n")
+                            print(f"\n[Error] Proveedor inválido '{arg}'. Opciones: {', '.join(supported_switches)}\n")
                     elif command == "/model":
                         if arg:
                             self.router.set_provider(provider=self.router.provider, model=arg)

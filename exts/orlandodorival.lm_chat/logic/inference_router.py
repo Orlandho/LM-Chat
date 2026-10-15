@@ -39,6 +39,7 @@ REASONING_MODEL_PATTERNS: List[str] = [
     r".*-r1.*",
     r"claude-3-7",
     r"deepseek-v4",
+    r"gemini-3(\.[0-9]+)?",
 ]
 
 
@@ -519,67 +520,81 @@ class InferenceRouter:
         headers: Dict[str, str],
         target_model: str,
         provider_name: str,
+        **kwargs: Any,
     ) -> Dict[str, Any]:
         """Ejecuta una petición HTTP individual no-streaming con diagnóstico completo de errores."""
         client_timeout = aiohttp.ClientTimeout(total=self._timeout)
         start_time = time.monotonic()
         logger.info(f"Petición no-streaming iniciada -> {provider_name} ({target_model}) en {url}")
+        max_retries = kwargs.get(
+            "max_retries",
+            2 if self.canonicalize_provider(self._provider) in ("gemini", "cloud", "openai", "claude") else 0
+        )
 
         try:
-            async with aiohttp.ClientSession(timeout=client_timeout) as session:
-                async with session.post(url, json=payload, headers=headers) as response:
-                    latency = round((time.monotonic() - start_time) * 1000, 1)
-                    if response.status == 200:
-                        body_text = await response.text(encoding="utf-8")
-                        data = json.loads(body_text)
-                        # Normalize Anthropic response format to OpenAI-standard choices structure
-                        if self._is_anthropic_direct() and "content" in data and isinstance(data["content"], list):
-                            text_parts = [b.get("text", "") for b in data["content"] if b.get("type") == "text"]
-                            full_text = "".join(text_parts)
-                            normalized_data = {
-                                "id": data.get("id", ""),
-                                "choices": [
-                                    {
-                                        "index": 0,
-                                        "message": {
-                                            "role": "assistant",
-                                            "content": full_text,
-                                        },
-                                        "finish_reason": data.get("stop_reason", "stop"),
-                                    }
-                                ],
-                                "usage": data.get("usage", {}),
+            for attempt in range(max_retries + 1):
+                async with aiohttp.ClientSession(timeout=client_timeout) as session:
+                    async with session.post(url, json=payload, headers=headers) as response:
+                        latency = round((time.monotonic() - start_time) * 1000, 1)
+                        if response.status == 200:
+                            body_text = await response.text(encoding="utf-8")
+                            data = json.loads(body_text)
+                            # Normalize Anthropic response format to OpenAI-standard choices structure
+                            if self._is_anthropic_direct() and "content" in data and isinstance(data["content"], list):
+                                text_parts = [b.get("text", "") for b in data["content"] if b.get("type") == "text"]
+                                full_text = "".join(text_parts)
+                                normalized_data = {
+                                    "id": data.get("id", ""),
+                                    "choices": [
+                                        {
+                                            "index": 0,
+                                            "message": {
+                                                "role": "assistant",
+                                                "content": full_text,
+                                            },
+                                            "finish_reason": data.get("stop_reason", "stop"),
+                                        }
+                                    ],
+                                    "usage": data.get("usage", {}),
+                                }
+                                logger.info(f"Petición exitosa Claude (HTTP 200 - {latency} ms)")
+                                return {"success": True, "data": normalized_data}
+                            logger.info(f"Petición exitosa {provider_name} (HTTP 200 - {latency} ms)")
+                            return {"success": True, "data": data}
+                        elif response.status in (429, 502, 503, 504) and attempt < max_retries:
+                            wait_sec = 1.0 * (attempt + 1)
+                            logger.info(
+                                f"Fallo temporal HTTP {response.status} en {provider_name}. "
+                                f"Reintentando en {wait_sec}s (intento {attempt + 1}/{max_retries})..."
+                            )
+                            await asyncio.sleep(wait_sec)
+                            continue
+                        else:
+                            try:
+                                error_raw = await response.text(encoding="utf-8")
+                                error_text = error_raw if isinstance(error_raw, str) else ""
+                            except Exception:
+                                error_text = ""
+                            logger.warning(
+                                f"Fallo HTTP {response.status} en {provider_name}: {error_text[:200]}"
+                            )
+                            diag = diagnose_inference_failure(
+                                provider=self._provider,
+                                model=target_model,
+                                base_url=self._base_url,
+                                status_code=response.status,
+                                error_type="HTTPError",
+                                raw_error=error_text,
+                                timeout=self._timeout,
+                            )
+                            return {
+                                "success": False,
+                                "error_type": "HTTPError",
+                                "status": response.status,
+                                "message": f"Error del servidor ({response.status}): {error_text}",
+                                "diagnostic": diag,
+                                "diagnostic_md": diag.to_markdown(),
                             }
-                            logger.info(f"Petición exitosa Claude (HTTP 200 - {latency} ms)")
-                            return {"success": True, "data": normalized_data}
-                        logger.info(f"Petición exitosa {provider_name} (HTTP 200 - {latency} ms)")
-                        return {"success": True, "data": data}
-                    else:
-                        try:
-                            error_raw = await response.text(encoding="utf-8")
-                            error_text = error_raw if isinstance(error_raw, str) else ""
-                        except Exception:
-                            error_text = ""
-                        logger.warning(
-                            f"Fallo HTTP {response.status} en {provider_name}: {error_text[:200]}"
-                        )
-                        diag = diagnose_inference_failure(
-                            provider=self._provider,
-                            model=target_model,
-                            base_url=self._base_url,
-                            status_code=response.status,
-                            error_type="HTTPError",
-                            raw_error=error_text,
-                            timeout=self._timeout,
-                        )
-                        return {
-                            "success": False,
-                            "error_type": "HTTPError",
-                            "status": response.status,
-                            "message": f"Error del servidor ({response.status}): {error_text}",
-                            "diagnostic": diag,
-                            "diagnostic_md": diag.to_markdown(),
-                        }
 
         except aiohttp.ClientConnectorError as e:
             logger.error(f"Conexión rehusada con {provider_name} en {url}: {e}")
@@ -698,6 +713,7 @@ class InferenceRouter:
             headers=headers,
             target_model=target_model,
             provider_name=self._provider,
+            **kwargs,
         )
 
     async def _execute_stream_request(
@@ -713,226 +729,256 @@ class InferenceRouter:
         client_timeout = aiohttp.ClientTimeout(total=self._timeout)
         start_time = time.monotonic()
         logger.info(f"Iniciando SSE stream -> {provider_name} ({target_model}) en {url}")
+        max_stream_retries = kwargs.get(
+            "max_retries",
+            2 if self.canonicalize_provider(self._provider) in ("gemini", "cloud", "openai", "claude") else 0
+        )
 
         try:
-            async with aiohttp.ClientSession(timeout=client_timeout) as session:
-                async with session.post(url, json=payload, headers=headers) as response:
-                    if response.status != 200:
-                        try:
-                            error_raw = await response.text(encoding="utf-8")
-                            error_text = error_raw if isinstance(error_raw, str) else ""
-                        except Exception:
-                            error_text = ""
-                        logger.warning(
-                            f"Fallo HTTP {response.status} en streaming con {provider_name}: {error_text[:200]}"
-                        )
-                        diag = diagnose_inference_failure(
-                            provider=self._provider,
-                            model=target_model,
-                            base_url=self._base_url,
-                            status_code=response.status,
-                            error_type="HTTPError",
-                            raw_error=error_text,
-                            timeout=self._timeout,
-                        )
-                        yield {
-                            "success": False,
-                            "error_type": "HTTPError",
-                            "status": response.status,
-                            "message": f"Error de servidor HTTP {response.status}: {error_text}",
-                            "diagnostic": diag,
-                            "diagnostic_md": diag.to_markdown(),
-                        }
-                        return
+            for attempt in range(max_stream_retries + 1):
+                async with aiohttp.ClientSession(timeout=client_timeout) as session:
+                    async with session.post(url, json=payload, headers=headers) as response:
+                        if response.status != 200:
+                            if response.status in (429, 502, 503, 504) and attempt < max_stream_retries:
+                                wait_sec = 1.0 * (attempt + 1)
+                                logger.info(
+                                    f"Streaming temporalmente no disponible (HTTP {response.status}). "
+                                    f"Reintentando en {wait_sec}s ({attempt + 1}/{max_stream_retries})..."
+                                )
+                                await asyncio.sleep(wait_sec)
+                                continue
 
-                    # Read SSE stream line by line
-                    token_count = 0
-                    reasoning_parser = StreamingReasoningParser()
-                    turbo_mode = kwargs.get("turbo_mode", False) or kwargs.get("turbo", False)
-                    turbo_buffer = ""
-                    last_turbo_yield = time.monotonic()
-
-                    async for raw_line in response.content:
-                        line = raw_line.decode("utf-8", errors="replace").strip()
-                        if not line or line.startswith(":"):
-                            # Skip keep-alive comments and empty lines
-                            continue
-
-                        if line.startswith("data:"):
-                            data_str = line[5:].strip()
-                            if data_str == "[DONE]":
-                                break
                             try:
-                                data_json = json.loads(data_str)
-                                # Check for Anthropic SSE format
-                                event_type = data_json.get("type")
-                                if event_type == "content_block_delta":
-                                    delta_obj = data_json.get("delta", {})
-                                    delta_type = delta_obj.get("type")
-                                    if delta_type == "text_delta":
-                                        chunk_text = delta_obj.get("text", "")
-                                        parts = reasoning_parser.process_chunk(chunk_text)
-                                        for part in parts:
-                                            if part["type"] == "reasoning":
-                                                token_count += 1
-                                                yield {
-                                                    "success": True,
-                                                    "data": {
-                                                        "choices": [
-                                                            {"delta": {"content": "", "reasoning_content": part["text"]}}
-                                                        ]
-                                                    },
-                                                }
-                                            else:
-                                                if turbo_mode:
-                                                    turbo_buffer += part["text"]
-                                                    now = time.monotonic()
-                                                    if len(turbo_buffer) >= 16 or (now - last_turbo_yield) >= 0.02:
+                                error_raw = await response.text(encoding="utf-8")
+                                error_text = error_raw if isinstance(error_raw, str) else ""
+                            except Exception:
+                                error_text = ""
+                            logger.warning(
+                                f"Fallo HTTP {response.status} en streaming con {provider_name}: {error_text[:200]}"
+                            )
+                            diag = diagnose_inference_failure(
+                                provider=self._provider,
+                                model=target_model,
+                                base_url=self._base_url,
+                                status_code=response.status,
+                                error_type="HTTPError",
+                                raw_error=error_text,
+                                timeout=self._timeout,
+                            )
+                            yield {
+                                "success": False,
+                                "error_type": "HTTPError",
+                                "status": response.status,
+                                "message": f"Error de servidor HTTP {response.status}: {error_text}",
+                                "diagnostic": diag,
+                                "diagnostic_md": diag.to_markdown(),
+                            }
+                            return
+
+                        # Read SSE stream line by line
+                        token_count = 0
+                        reasoning_parser = StreamingReasoningParser()
+                        turbo_mode = kwargs.get("turbo_mode", False) or kwargs.get("turbo", False)
+                        turbo_buffer = ""
+                        last_turbo_yield = time.monotonic()
+
+                        try:
+                            async for raw_line in response.content:
+                                line = raw_line.decode("utf-8", errors="replace").strip()
+                                if not line or line.startswith(":"):
+                                    # Skip keep-alive comments and empty lines
+                                    continue
+
+                                if line.startswith("data:"):
+                                    data_str = line[5:].strip()
+                                    if data_str == "[DONE]":
+                                        break
+                                    try:
+                                        data_json = json.loads(data_str)
+                                        # Check for Anthropic SSE format
+                                        event_type = data_json.get("type")
+                                        if event_type == "content_block_delta":
+                                            delta_obj = data_json.get("delta", {})
+                                            delta_type = delta_obj.get("type")
+                                            if delta_type == "text_delta":
+                                                chunk_text = delta_obj.get("text", "")
+                                                parts = reasoning_parser.process_chunk(chunk_text)
+                                                for part in parts:
+                                                    if part["type"] == "reasoning":
                                                         token_count += 1
                                                         yield {
                                                             "success": True,
                                                             "data": {
                                                                 "choices": [
-                                                                    {"delta": {"content": turbo_buffer}}
+                                                                    {"delta": {"content": "", "reasoning_content": part["text"]}}
                                                                 ]
                                                             },
                                                         }
-                                                        turbo_buffer = ""
-                                                        last_turbo_yield = now
-                                                else:
-                                                    token_count += 1
-                                                    yield {
-                                                        "success": True,
-                                                        "data": {
-                                                            "choices": [
-                                                                {"delta": {"content": part["text"]}}
-                                                            ]
-                                                        },
-                                                    }
-                                    elif delta_type == "thinking_delta":
-                                        chunk_text = delta_obj.get("thinking", "")
-                                        token_count += 1
-                                        yield {
-                                            "success": True,
-                                            "data": {
-                                                "choices": [
-                                                    {"delta": {"content": "", "reasoning_content": chunk_text}}
-                                                ]
-                                            },
-                                        }
-                                elif event_type == "message_stop":
-                                    break
-                                elif event_type == "error":
-                                    err_payload = str(data_json.get("error", "Error en stream"))
-                                    diag = diagnose_inference_failure(
-                                        provider=self._provider,
-                                        model=target_model,
-                                        base_url=self._base_url,
-                                        error_type="ClaudeError",
-                                        raw_error=err_payload,
-                                    )
-                                    yield {
-                                        "success": False,
-                                        "error_type": "ClaudeError",
-                                        "message": err_payload,
-                                        "diagnostic": diag,
-                                        "diagnostic_md": diag.to_markdown(),
-                                    }
-                                    break
-                                else:
-                                    if "choices" in data_json:
-                                        choices = data_json.get("choices", [])
-                                        if choices and isinstance(choices[0], dict):
-                                            delta = choices[0].get("delta", {})
-                                            if isinstance(delta, dict):
-                                                exp_reasoning = delta.get("reasoning_content") or delta.get("reasoning") or delta.get("thought")
-                                                raw_content = delta.get("content")
-
-                                                if exp_reasoning:
-                                                    token_count += 1
-                                                    yield {
-                                                        "success": True,
-                                                        "data": {
-                                                            "choices": [
-                                                                {"delta": {"content": "", "reasoning_content": exp_reasoning}}
-                                                            ]
-                                                        },
-                                                    }
-
-                                                if raw_content:
-                                                    parts = reasoning_parser.process_chunk(raw_content)
-                                                    for part in parts:
-                                                        if part["type"] == "reasoning":
-                                                            token_count += 1
-                                                            yield {
-                                                                "success": True,
-                                                                "data": {
-                                                                    "choices": [
-                                                                        {"delta": {"content": "", "reasoning_content": part["text"]}}
-                                                                    ]
-                                                                },
-                                                            }
-                                                        else:
-                                                            if turbo_mode:
-                                                                turbo_buffer += part["text"]
-                                                                now = time.monotonic()
-                                                                if len(turbo_buffer) >= 16 or (now - last_turbo_yield) >= 0.02:
-                                                                    token_count += 1
-                                                                    yield {
-                                                                        "success": True,
-                                                                        "data": {
-                                                                            "choices": [
-                                                                                {"delta": {"content": turbo_buffer}}
-                                                                            ]
-                                                                        },
-                                                                    }
-                                                                    turbo_buffer = ""
-                                                                    last_turbo_yield = now
-                                                            else:
+                                                    else:
+                                                        if turbo_mode:
+                                                            turbo_buffer += part["text"]
+                                                            now = time.monotonic()
+                                                            if len(turbo_buffer) >= 16 or (now - last_turbo_yield) >= 0.02:
                                                                 token_count += 1
                                                                 yield {
                                                                     "success": True,
                                                                     "data": {
                                                                         "choices": [
-                                                                            {"delta": {"content": part["text"]}}
+                                                                            {"delta": {"content": turbo_buffer}}
                                                                         ]
                                                                     },
                                                                 }
-                                                elif not exp_reasoning:
-                                                    token_count += 1
-                                                    yield {"success": True, "data": data_json}
-                            except json.JSONDecodeError:
-                                continue
+                                                                turbo_buffer = ""
+                                                                last_turbo_yield = now
+                                                        else:
+                                                            token_count += 1
+                                                            yield {
+                                                                "success": True,
+                                                                "data": {
+                                                                    "choices": [
+                                                                        {"delta": {"content": part["text"]}}
+                                                                    ]
+                                                                },
+                                                            }
+                                            elif delta_type == "thinking_delta":
+                                                chunk_text = delta_obj.get("thinking", "")
+                                                token_count += 1
+                                                yield {
+                                                    "success": True,
+                                                    "data": {
+                                                        "choices": [
+                                                            {"delta": {"content": "", "reasoning_content": chunk_text}}
+                                                        ]
+                                                    },
+                                                }
+                                        elif event_type == "message_stop":
+                                            break
+                                        elif event_type == "error":
+                                            err_payload = str(data_json.get("error", "Error en stream"))
+                                            diag = diagnose_inference_failure(
+                                                provider=self._provider,
+                                                model=target_model,
+                                                base_url=self._base_url,
+                                                error_type="ClaudeError",
+                                                raw_error=err_payload,
+                                            )
+                                            yield {
+                                                "success": False,
+                                                "error_type": "ClaudeError",
+                                                "message": err_payload,
+                                                "diagnostic": diag,
+                                                "diagnostic_md": diag.to_markdown(),
+                                            }
+                                            break
+                                        else:
+                                            if "choices" in data_json:
+                                                choices = data_json.get("choices", [])
+                                                if choices and isinstance(choices[0], dict):
+                                                    delta = choices[0].get("delta", {})
+                                                    if isinstance(delta, dict):
+                                                        exp_reasoning = delta.get("reasoning_content") or delta.get("reasoning") or delta.get("thought")
+                                                        raw_content = delta.get("content")
 
-                    # Flush remaining buffers
-                    for part in reasoning_parser.flush():
-                        if part["type"] == "reasoning":
+                                                        if exp_reasoning:
+                                                            token_count += 1
+                                                            yield {
+                                                                "success": True,
+                                                                "data": {
+                                                                    "choices": [
+                                                                        {"delta": {"content": "", "reasoning_content": exp_reasoning}}
+                                                                    ]
+                                                                },
+                                                            }
+
+                                                        if raw_content:
+                                                            parts = reasoning_parser.process_chunk(raw_content)
+                                                            for part in parts:
+                                                                if part["type"] == "reasoning":
+                                                                    token_count += 1
+                                                                    yield {
+                                                                        "success": True,
+                                                                        "data": {
+                                                                            "choices": [
+                                                                                {"delta": {"content": "", "reasoning_content": part["text"]}}
+                                                                            ]
+                                                                        },
+                                                                    }
+                                                                else:
+                                                                    if turbo_mode:
+                                                                        turbo_buffer += part["text"]
+                                                                        now = time.monotonic()
+                                                                        if len(turbo_buffer) >= 16 or (now - last_turbo_yield) >= 0.02:
+                                                                            token_count += 1
+                                                                            yield {
+                                                                                "success": True,
+                                                                                "data": {
+                                                                                    "choices": [
+                                                                                        {"delta": {"content": turbo_buffer}}
+                                                                                    ]
+                                                                                },
+                                                                            }
+                                                                            turbo_buffer = ""
+                                                                            last_turbo_yield = now
+                                                                    else:
+                                                                        token_count += 1
+                                                                        yield {
+                                                                            "success": True,
+                                                                            "data": {
+                                                                                "choices": [
+                                                                                    {"delta": {"content": part["text"]}}
+                                                                                ]
+                                                                            },
+                                                                        }
+                                                        elif not exp_reasoning:
+                                                            token_count += 1
+                                                            yield {"success": True, "data": data_json}
+                                    except json.JSONDecodeError:
+                                        continue
+                        except (aiohttp.ClientConnectionError, aiohttp.ClientPayloadError, asyncio.IncompleteReadError) as stream_err:
+                            if token_count > 0:
+                                logger.info(
+                                    f"Conexión SSE cerrada por el servidor remoto tras emitir {token_count} chunks ({stream_err}). Finalizando recepción limpiamente."
+                                )
+                            elif attempt < max_stream_retries:
+                                wait_sec = 1.0 * (attempt + 1)
+                                logger.info(
+                                    f"Conexión perdida antes de recibir datos ({stream_err}). Reintentando en {wait_sec}s ({attempt + 1}/{max_stream_retries})..."
+                                )
+                                await asyncio.sleep(wait_sec)
+                                continue
+                            else:
+                                raise
+
+                        # Flush remaining buffers
+                        for part in reasoning_parser.flush():
+                            if part["type"] == "reasoning":
+                                token_count += 1
+                                yield {
+                                    "success": True,
+                                    "data": {
+                                        "choices": [
+                                            {"delta": {"content": "", "reasoning_content": part["text"]}}
+                                        ]
+                                    },
+                                }
+                            else:
+                                turbo_buffer += part["text"]
+
+                        if turbo_buffer:
                             token_count += 1
                             yield {
                                 "success": True,
                                 "data": {
                                     "choices": [
-                                        {"delta": {"content": "", "reasoning_content": part["text"]}}
+                                        {"delta": {"content": turbo_buffer}}
                                     ]
                                 },
                             }
-                        else:
-                            turbo_buffer += part["text"]
+                            turbo_buffer = ""
 
-                    if turbo_buffer:
-                        token_count += 1
-                        yield {
-                            "success": True,
-                            "data": {
-                                "choices": [
-                                    {"delta": {"content": turbo_buffer}}
-                                ]
-                            },
-                        }
-                        turbo_buffer = ""
-
-                    elapsed = round(time.monotonic() - start_time, 2)
-                    logger.debug(f"SSE stream finalizado con {self._provider} ({token_count} chunks en {elapsed}s)")
+                        elapsed = round(time.monotonic() - start_time, 2)
+                        logger.debug(f"SSE stream finalizado con {self._provider} ({token_count} chunks en {elapsed}s)")
+                        return
 
         except aiohttp.ClientConnectorError as e:
             logger.error(f"Conexión rehusada durante streaming con {self._provider} en {self._base_url}: {e}")
