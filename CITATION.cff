@@ -10,7 +10,7 @@ abstract: >-
   Permite generar, manipular, simular y corregir geometría y cinemática 3D
   en OpenUSD mediante modelos de lenguaje locales (LM Studio, Ollama, vLLM)
   y en la nube (Gemini, Claude, OpenAI) con bucle ReAct y MCP.
-version: 1.2.0
+version: 1.3.0
 date-released: 2026-10-14
 url: "https://github.com/Orlandho/LM-Chat"
 repository-code: "https://github.com/Orlandho/LM-Chat"
