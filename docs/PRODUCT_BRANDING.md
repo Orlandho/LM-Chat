@@ -87,7 +87,7 @@ Provides seamless, zero-latency inference across heterogeneous local and cloud p
   - **Ollama:** `http://localhost:11434/v1` (Llama 3.3, Qwen 2.5 Coder, Mistral).
   - **vLLM / Enterprise Local:** `http://localhost:8000/v1` (NVIDIA Nemotron 70B, DeepSeek-R1).
 - **Cloud / Hybrid Providers:**
-  - **Google Gemini:** Direct OpenAI-compatible streaming API (`gemini-2.5-flash`, `gemini-3.6-flash`).
+  - **Google Gemini:** Direct OpenAI-compatible streaming API (`gemini-3.8-flash`, `gemini-3.7-flash`).
   - **Anthropic & OpenAI:** Standard cloud endpoints with custom timeouts up to 600s.
 
 ### 3.2. Spatial OpenUSD Context Serializer (`logic/spatial_usd_context.py`)
@@ -119,7 +119,7 @@ Built on JSON-RPC 2.0 specifications, allowing the AI agent to dynamically load 
 python cli/lmchat_cli.py --provider lm_studio
 
 # Headless autonomous batch generation
-python cli/lmchat_cli.py --provider cloud --model gemini-2.5-flash --prompt "Construye una escena con 5 cubos con física rígida y colores primarios"
+python cli/lmchat_cli.py --provider gemini --model gemini-3.8-flash --prompt "Construye una escena con 5 cubos con física rígida y colores primarios"
 ```
 
 ---

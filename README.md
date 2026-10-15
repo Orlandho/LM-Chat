@@ -16,7 +16,7 @@
   - **Enterprise CLI (`cli/lmchat_cli.py`):** Interactive REPL and headless pipeline execution for automation, CI/CD, and power users.
 * **Multi-Provider Inference Router:**
   - **Local Privacy (Air-Gapped):** LM Studio (`:1234`), Ollama (`:11434`), vLLM (`:8000`) on NVIDIA RTX GPUs (RTX 40/50 Series) with auto-failover and cluster pooling.
-  - **Cloud / Hybrid:** Google Gemini (3.7 / 3.6 Flash / Pro), OpenAI (GPT-4o/o3), Anthropic Claude (3.7 / 3.5 Sonnet) via standard OpenAI-compatible API endpoints.
+  - **Cloud / Hybrid:** Google Gemini (3.8 / 3.7 Flash / Pro), OpenAI (GPT-4o/o3), Anthropic Claude (3.7 / 3.5 Sonnet) via standard OpenAI-compatible API endpoints.
 * **OpenUSD Spatial Context Serializer:**
   - Real-time serialization of stage hierarchy, prims, transforms, lights, materials, and physics metadata into structured JSON for LLM spatial awareness.
 * **Self-Healing ReAct Loop:**
@@ -94,7 +94,7 @@ To test models, evaluate reasoning streams, or run automated batch prompts direc
 python cli/lmchat_cli.py --provider lm_studio
 
 # Headless prompt with Google Gemini Cloud
-python cli/lmchat_cli.py --provider cloud --model gemini-2.5-flash --prompt "Genera una celda robótica con cintas transportadoras en OpenUSD"
+python cli/lmchat_cli.py --provider gemini --model gemini-3.8-flash --prompt "Genera una celda robótica con cintas transportadoras en OpenUSD"
 
 # Query local conversation history
 python cli/lmchat_cli.py --history

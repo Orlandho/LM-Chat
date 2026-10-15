@@ -37,6 +37,8 @@ class TestReasoningModelAwareness:
             "deepseek-r1-distill-qwen-32b",
             "qwq-32b",
             "claude-3-7-sonnet-thinking",
+            "gemini-3.8-flash",
+            "gemini-3.7-flash",
             "gemini-2.0-flash-thinking",
             "gemini-2.5-flash-thinking",
             "deepseek-reasoner",

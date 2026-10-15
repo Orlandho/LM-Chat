@@ -222,7 +222,7 @@ class TestInferenceRouterNewProviders(unittest.IsolatedAsyncioTestCase):
         router = InferenceRouter(provider="gemini", api_key="test-gemini-key")
         self.assertEqual(router.provider, "gemini")
         self.assertEqual(router.base_url, "https://generativelanguage.googleapis.com/v1beta/openai")
-        self.assertEqual(router.model, "gemini-2.0-flash")
+        self.assertEqual(router.model, "gemini-3.8-flash")
 
         headers = router.get_headers()
         self.assertEqual(headers["Authorization"], "Bearer test-gemini-key")
@@ -237,7 +237,7 @@ class TestInferenceRouterNewProviders(unittest.IsolatedAsyncioTestCase):
         r_gem = InferenceRouter(provider="Google Gemini API")
         self.assertEqual(r_gem.provider, "gemini")
         self.assertEqual(r_gem.base_url, "https://generativelanguage.googleapis.com/v1beta/openai")
-        self.assertEqual(r_gem.model, "gemini-2.0-flash")
+        self.assertEqual(r_gem.model, "gemini-3.8-flash")
 
         # OpenAI API
         r_oai = InferenceRouter(provider="OpenAI API")
