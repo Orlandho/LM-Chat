@@ -213,3 +213,98 @@ class TestCLIGeminiAndReasoning:
                 assert "name: " in content, f"{skill_name} debe definir un campo name en frontmatter"
                 assert "description: " in content, f"{skill_name} debe definir description en frontmatter"
 
+    def test_gemini_default_model_is_gemini_3_8_flash(self):
+        """Verifica que el modelo por defecto para Gemini sea gemini-3.8-flash en InferenceRouter."""
+        router = InferenceRouter(provider="gemini")
+        assert router.model == "gemini-3.8-flash"
+
+        router_google = InferenceRouter(provider="google")
+        assert router_google.model == "gemini-3.8-flash"
+
+    def test_gemini_google_api_key_env_fallback(self, monkeypatch, tmp_path):
+        """Verifica que tanto InferenceRouter como SettingsManager detecten GOOGLE_API_KEY si GEMINI_API_KEY no está definido."""
+        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+        monkeypatch.setenv("GOOGLE_API_KEY", "AQ.fallback_google_key")
+
+        router = InferenceRouter(provider="gemini")
+        headers = router.get_headers()
+        assert headers.get("Authorization") == "Bearer AQ.fallback_google_key"
+
+        from logic.settings_manager import SettingsManager
+        cfg_path = str(tmp_path / "settings.json")
+        sm = SettingsManager(config_path=cfg_path)
+        effective_key = sm.get_effective_api_key("Google Gemini API")
+        assert effective_key == "AQ.fallback_google_key"
+
+    @pytest.mark.asyncio
+    async def test_cli_execute_prompt_displays_thinking_and_response_headers(self, tmp_path, capsys):
+        """Verifica que la salida CLI imprima los encabezados visuales [🧠 Pensando...] y [Respuesta]."""
+        mgr = LocalChatHistoryManager(storage_dir=str(tmp_path))
+        router = InferenceRouter(provider="gemini", model="gemini-3.8-flash")
+
+        async def mock_stream(messages):
+            yield {
+                "success": True,
+                "data": {
+                    "choices": [
+                        {"delta": {"content": "", "reasoning_content": "Paso 1: analizar."}}
+                    ]
+                },
+            }
+            yield {
+                "success": True,
+                "data": {
+                    "choices": [
+                        {"delta": {"content": "Solución final."}}
+                    ]
+                },
+            }
+
+        router.stream_chat_completions = mock_stream
+        cli = LMChatCLI(router=router, system_prompt="Test", history_manager=mgr)
+
+        res = await cli.execute_prompt("Pregunta compleja")
+        assert res == "Solución final."
+
+        captured = capsys.readouterr()
+        assert "[🧠 Pensando...]" in captured.out
+        assert "[Respuesta]" in captured.out
+        assert "Paso 1: analizar." in captured.out
+        assert "Solución final." in captured.out
+
+    @pytest.mark.asyncio
+    async def test_fetch_remote_models_normalizes_gemini_models_prefix(self, tmp_path):
+        """Verifica que fetch_remote_models elimine el prefijo models/ para modelos de Gemini."""
+        from logic.settings_manager import SettingsManager
+        cfg_file = str(tmp_path / "settings.json")
+        sm = SettingsManager(config_path=cfg_file)
+
+        mock_gemini_response = {
+            "data": [
+                {"id": "models/gemini-3.8-flash"},
+                {"id": "models/gemini-3.5-flash-lite"},
+                {"id": "models/gemma-4-31b-it"}
+            ]
+        }
+
+        mock_resp = AsyncMock()
+        mock_resp.status = 200
+        mock_resp.json = AsyncMock(return_value=mock_gemini_response)
+
+        with patch("aiohttp.ClientSession.get") as mock_get:
+            mock_get.return_value.__aenter__.return_value = mock_resp
+            models = await sm.fetch_remote_models("Google Gemini API")
+            assert "gemini-3.8-flash" in models
+            assert "gemini-3.5-flash-lite" in models
+            assert "gemma-4-31b-it" in models
+            assert not any(m.startswith("models/") for m in models)
+
+    def test_agent_manager_accepts_usd_controller_injection(self):
+        """Verifica inyección de dependencias para USDController en AgentManager."""
+        from logic.agent_manager import AgentManager
+        from unittest.mock import MagicMock
+        mock_ctrl = MagicMock()
+        agent = AgentManager(usd_controller=mock_ctrl)
+        assert agent.usd_controller is mock_ctrl
+
+

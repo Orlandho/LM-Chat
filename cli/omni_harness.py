@@ -391,6 +391,7 @@ class LMChatCLI:
 
         full_content = ""
         error_occurred = False
+        in_reasoning_phase = False
 
         async for chunk_obj in self.router.stream_chat_completions(self.messages):
             if chunk_obj.get("success"):
@@ -401,12 +402,26 @@ class LMChatCLI:
                     content = delta.get("content") or ""
                     reasoning = delta.get("reasoning_content") or delta.get("thought") or ""
                     if reasoning:
+                        if not in_reasoning_phase:
+                            try:
+                                sys.stdout.write("\n[🧠 Pensando...]\n")
+                                sys.stdout.flush()
+                            except Exception:
+                                pass
+                            in_reasoning_phase = True
                         try:
                             sys.stdout.write(reasoning)
                             sys.stdout.flush()
                         except Exception:
                             pass
                     if content:
+                        if in_reasoning_phase:
+                            try:
+                                sys.stdout.write("\n\n[Respuesta]\n")
+                                sys.stdout.flush()
+                            except Exception:
+                                pass
+                            in_reasoning_phase = False
                         full_content += content
                         try:
                             sys.stdout.write(content)

@@ -41,6 +41,7 @@ class AgentManager:
         model: Optional[str] = None,
         execution_mode: str = ExecutionMode.IMMEDIATE.value,
         mcp_registry: Optional[IMCPClientRegistry] = None,
+        usd_controller: Optional[USDController] = None,
     ) -> None:
         """
         Initializes the AgentManager with inference router, USD controller, and execution mode.
@@ -53,6 +54,7 @@ class AgentManager:
             model (Optional[str]): Model name if router is not supplied.
             execution_mode (str): 'immediate' or 'plan_and_confirm'.
             mcp_registry (Optional[IMCPClientRegistry]): Registry for MCP tools.
+            usd_controller (Optional[USDController]): USDController instance for stage execution.
         """
         if router:
             self._router = router
@@ -61,7 +63,7 @@ class AgentManager:
                 provider=provider, base_url=base_url, api_key=api_key, model=model
             )
 
-        self._usd_controller = USDController()
+        self._usd_controller = usd_controller or USDController()
         self._execution_mode: str = execution_mode
         self._pending_code: Optional[str] = None
         self._turbo_mode: bool = False
