@@ -186,6 +186,9 @@ class USDInspector(IUSDInspector):
         has_attr = query_criteria.get("has_attribute")
         attr_filter = query_criteria.get("attribute_filter", {})
 
+        # Optimization: Pre-compile regex once outside traversal loop to avoid re-compiling per prim
+        compiled_pattern = re.compile(name_pattern, re.IGNORECASE) if name_pattern else None
+
         try:
             for prim in stage.Traverse():
                 if not prim or _is_mock(prim):
@@ -194,23 +197,20 @@ class USDInspector(IUSDInspector):
                 if hasattr(prim, "IsValid") and callable(prim.IsValid) and not prim.IsValid():
                     continue
 
-                path_str = str(prim.GetPath())
-
-                # 1. Filtro por tipo
+                # 1. Early filter by type before computing path string
                 if target_type:
                     prim_type = str(prim.GetTypeName()).lower() if hasattr(prim, "GetTypeName") else ""
                     if target_type not in prim_type:
                         continue
 
-                # 2. Filtro por patrón de nombre
-                if name_pattern:
-                    if not re.search(name_pattern, path_str, re.IGNORECASE):
-                        continue
+                # Cache GetAttribute and HasAttribute existence once per prim
+                has_get_attr = hasattr(prim, "GetAttribute")
+                has_has_attr = hasattr(prim, "HasAttribute")
 
-                # 3. Filtro por visibilidad
+                # 2. Filter by visibility
                 if target_vis:
                     vis_val = "inherited"
-                    if hasattr(prim, "GetAttribute"):
+                    if has_get_attr:
                         vis_attr = prim.GetAttribute("visibility")
                         if vis_attr and hasattr(vis_attr, "Get"):
                             v = vis_attr.Get()
@@ -219,26 +219,39 @@ class USDInspector(IUSDInspector):
                     if vis_val != target_vis:
                         continue
 
-                # 4. Filtro por presencia de atributo
+                # 3. Filter by presence of attribute
                 if has_attr:
-                    if not (hasattr(prim, "HasAttribute") and prim.HasAttribute(has_attr)):
-                        if hasattr(prim, "GetAttribute") and not prim.GetAttribute(has_attr):
-                            continue
+                    if has_has_attr and prim.HasAttribute(has_attr):
+                        pass
+                    elif has_get_attr and prim.GetAttribute(has_attr):
+                        pass
+                    else:
+                        continue
 
-                # 5. Filtro por valor de atributos
+                # 4. Filter by attribute values
                 if attr_filter and isinstance(attr_filter, dict):
+                    if not has_get_attr:
+                        continue
                     match_attrs = True
                     for k, expected_v in attr_filter.items():
-                        if hasattr(prim, "GetAttribute"):
-                            attr = prim.GetAttribute(k)
-                            val = attr.Get() if attr and hasattr(attr, "Get") else None
-                            if val != expected_v:
-                                match_attrs = False
-                                break
+                        attr = prim.GetAttribute(k)
+                        val = attr.Get() if attr and hasattr(attr, "Get") else None
+                        if val != expected_v:
+                            match_attrs = False
+                            break
                     if not match_attrs:
                         continue
 
-                matched_paths.append(path_str)
+                # Compute path string only after lightweight attribute & type filters pass
+                path_str = str(prim.GetPath()) if hasattr(prim, "GetPath") else ""
+
+                # 5. Filter by name pattern using pre-compiled regex
+                if compiled_pattern:
+                    if not compiled_pattern.search(path_str):
+                        continue
+
+                if path_str:
+                    matched_paths.append(path_str)
 
         except Exception as e:
             logger.error(f"Error buscando prims por consulta: {e}", exc_info=True)
