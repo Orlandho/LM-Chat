@@ -64,6 +64,15 @@ class USDController:
         Returns:
             dict: Structured response indicating success or failure.
         """
+        if not isinstance(python_code, str):
+            return {"success": False, "error_msg": "Input validation error: python_code must be a string."}
+
+        if not python_code.strip():
+            return {"success": False, "error_msg": "Input validation error: python_code cannot be empty."}
+
+        if len(python_code) > self.MAX_CODE_SIZE:
+            return {"success": False, "error_msg": f"Security limit exceeded: Code size exceeds maximum allowed limit ({self.MAX_CODE_SIZE} bytes)."}
+
         # Security Policy & Guardrail validation
         is_valid, violation_err = self._policy.validate_code(python_code)
         if not is_valid:
