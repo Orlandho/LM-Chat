@@ -153,7 +153,18 @@ class ClusterManager(IClusterManager):
         Returns:
             bool: True si el nodo responde correctamente.
         """
-        clean_url = node.url.rstrip("/")
+        raw_url = (node.url or "").strip().replace("\r", "").replace("\n", "")
+        if not (raw_url.startswith("http://") or raw_url.startswith("https://")):
+            node.is_healthy = False
+            self._failure_timestamps[node.name] = time.time()
+            node.last_checked_at = datetime.now(timezone.utc).isoformat()
+            logger.warning(
+                f"Nodo de clúster '{node.name}' rechazado: Esquema de URL no permitido en '{node.url}'. "
+                "Solo se permiten esquemas http:// y https://."
+            )
+            return False
+
+        clean_url = raw_url.rstrip("/")
         # Detectar endpoint adecuado para sondeo (/models o /health)
         ping_url = f"{clean_url}/models" if not clean_url.endswith("/models") else clean_url
 

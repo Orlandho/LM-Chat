@@ -157,6 +157,21 @@ class TestClusterManager:
             assert node1.is_healthy is True
             assert node1.last_latency_ms >= 0.0
 
+    @pytest.mark.asyncio
+    async def test_cluster_manager_rejects_non_http_node_urls(self):
+        """Verifica que nodos con esquemas no HTTP/HTTPS son rechazados en el sondeo de salud."""
+        invalid_node = ClusterNode(name="BadNode", url="file:///etc/passwd")
+        ftp_node = ClusterNode(name="FTPNode", url="ftp://192.168.1.50/api")
+        cm = ClusterManager(nodes=[invalid_node, ftp_node])
+
+        with patch("aiohttp.ClientSession.get") as mock_get:
+            health_map = await cm.check_health_all()
+            assert health_map.get("BadNode") is False
+            assert health_map.get("FTPNode") is False
+            assert invalid_node.is_healthy is False
+            assert ftp_node.is_healthy is False
+            mock_get.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # 3. PRUEBAS: InferenceRouter con Cluster Failover
