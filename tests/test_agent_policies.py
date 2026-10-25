@@ -101,6 +101,8 @@ cube.AddTranslateOp().Set(Gf.Vec3d(0.0, 10.0, 0.0))
             "import os\nos.system('calc')",
             "import os\nos.remove('/path/file.usd')",
             "import os\nos.popen('whoami')",
+            "import os\ngetattr(os, 'system')('calc')",
+            "import os\nfn = getattr(os, 'remove')\nfn('/path/file.usd')",
         ]
 
         for code in cases:
