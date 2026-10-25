@@ -51,6 +51,12 @@ def is_reasoning_model(model_name: str) -> bool:
     return any(re.search(pat, clean_name) for pat in REASONING_MODEL_PATTERNS)
 
 
+# Pre-computed tag prefix tuples for CPython str.endswith C-level fast matching
+# ordered from longest prefix to shortest prefix. Avoids python loop and string slice allocations per chunk.
+_THINK_START_PREFIXES = tuple("<think>"[:i] for i in range(len("<think>") - 1, 0, -1))
+_THINK_END_PREFIXES = tuple("</think>"[:i] for i in range(len("</think>") - 1, 0, -1))
+
+
 class StreamingReasoningParser:
     """
     Parser incremental para flujos SSE que separa bloques de pensamiento (<think>...</think>)
@@ -87,13 +93,12 @@ class StreamingReasoningParser:
                     self._buffer = self._buffer[tag_idx + len("<think>"):]
                     self._in_think = True
                 else:
-                    # Comprobar si el final del buffer tiene un prefijo parcial de <think>
-                    held = 0
-                    for i in range(1, len("<think>")):
-                        if self._buffer.endswith("<think>"[:i]):
-                            held = i
-                            break
-                    if held > 0:
+                    # Optimization: Fast C-level tuple matching for partial tag prefix at buffer end.
+                    # endswith(tuple) eliminates inner Python loops and repeated string slicing per token chunk.
+                    if self._buffer.endswith(_THINK_START_PREFIXES):
+                        held = next(
+                            len(pref) for pref in _THINK_START_PREFIXES if self._buffer.endswith(pref)
+                        )
                         emit_part = self._buffer[:-held]
                         if emit_part:
                             results.append({"type": "content", "text": emit_part})
@@ -112,12 +117,11 @@ class StreamingReasoningParser:
                     self._buffer = self._buffer[tag_idx + len("</think>"):]
                     self._in_think = False
                 else:
-                    held = 0
-                    for i in range(1, len("</think>")):
-                        if self._buffer.endswith("</think>"[:i]):
-                            held = i
-                            break
-                    if held > 0:
+                    # Optimization: Fast C-level tuple matching for partial tag prefix at buffer end.
+                    if self._buffer.endswith(_THINK_END_PREFIXES):
+                        held = next(
+                            len(pref) for pref in _THINK_END_PREFIXES if self._buffer.endswith(pref)
+                        )
                         emit_part = self._buffer[:-held]
                         if emit_part:
                             results.append({"type": "reasoning", "text": emit_part})

@@ -27,3 +27,9 @@
 **Learning:** Querying USD prims by name pattern or attribute filter in `USDInspector.find_prims_by_query()` previously computed string representations (`str(prim.GetPath())`) and re-compiled regular expressions (`re.search(name_pattern, path_str, re.IGNORECASE)`) for every traversed prim in large stage hierarchies. Additionally, checking `hasattr(prim, "GetAttribute")` repeatedly inside inner filter loops added method lookup overhead.
 
 **Action:** Pre-compile regex search patterns once outside traversal loops, cache `hasattr` checks per prim, and order cheap filter operations (such as type checks) before string path conversions and regex evaluations.
+
+## 2026-04-03 - CPython `str.endswith(tuple)` for Streaming Tag Prefix Matching
+
+**Learning:** In SSE streaming responses (e.g., `StreamingReasoningParser`), checking for partial trailing `<think>` or `</think>` tags using an inner Python `for` loop that repeatedly sliced prefix strings (`"<think>"[:i]`) created tens of thousands of temporary string slice allocations and loop overhead per response stream. Using pre-computed tuples of tag prefixes (`_THINK_START_PREFIXES` and `_THINK_END_PREFIXES`) with CPython's fast `str.endswith(tuple)` delegates prefix matching to C-level evaluation.
+
+**Action:** Use pre-computed tuples of tag prefixes with `str.endswith(tuple)` for partial tag checking in streaming text chunk parsers.
