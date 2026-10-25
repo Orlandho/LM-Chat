@@ -146,6 +146,14 @@ class SpatialSecurityPolicy(IAgentPolicy):
                             False,
                             f"Security Policy Violation: Execution of forbidden builtin function '{func_name}()' is blocked.",
                         )
+                    if func_name == "getattr" and len(node.args) >= 2:
+                        attr_arg = node.args[1]
+                        if isinstance(attr_arg, ast.Constant) and isinstance(attr_arg.value, str):
+                            if attr_arg.value in self.config.forbidden_os_attributes:
+                                return (
+                                    False,
+                                    f"Security Policy Violation: Dangerous system operation '{attr_arg.value}()' via getattr() is blocked.",
+                                )
 
                 # Llamadas a atributos (ej. os.system(...), os.remove(...))
                 elif isinstance(node.func, ast.Attribute):
