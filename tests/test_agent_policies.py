@@ -206,6 +206,15 @@ for i in range(150):
         assert valid is False
         assert "forbidden builtin function '__import__()'" in err
 
+    def test_forbidden_open_builtin_blocked(self):
+        """Bloquea llamadas a open() para prevenir operaciones arbitrarias sobre el sistema de archivos."""
+        policy = SpatialSecurityPolicy()
+
+        open_code = "f = open('/etc/passwd', 'r')"
+        valid, err = policy.validate_code(open_code)
+        assert valid is False
+        assert "forbidden builtin function 'open()'" in err
+
     def test_usd_controller_group_prims_policy_limits(self):
         """Verifica que USDController.group_prims respete el límite de prims y rutas destino protegidas."""
         from logic.usd_controller import USDController

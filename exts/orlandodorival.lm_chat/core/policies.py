@@ -53,6 +53,7 @@ class AgentPolicyConfig:
         "exec",
         "__import__",
         "breakpoint",
+        "open",
     )
     forbidden_os_attributes: Tuple[str, ...] = (
         "system",
