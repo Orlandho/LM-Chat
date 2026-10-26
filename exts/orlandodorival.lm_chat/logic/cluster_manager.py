@@ -143,12 +143,17 @@ class ClusterManager(IClusterManager):
 
         return eligible_nodes[0]
 
-    async def check_health_node(self, node: ClusterNode) -> bool:
+    async def check_health_node(
+        self,
+        node: ClusterNode,
+        session: Optional[aiohttp.ClientSession] = None,
+    ) -> bool:
         """
         Sondea asíncronamente el estado de salud y latencia de un nodo.
 
         Args:
             node (ClusterNode): Nodo a sondear.
+            session (Optional[aiohttp.ClientSession]): Sesión aiohttp reutilizable opcional.
 
         Returns:
             bool: True si el nodo responde correctamente.
@@ -162,24 +167,30 @@ class ClusterManager(IClusterManager):
             headers["Authorization"] = f"Bearer {node.api_key}"
 
         start_time = time.perf_counter()
-        try:
-            timeout_cfg = aiohttp.ClientTimeout(total=self._health_check_timeout)
-            async with aiohttp.ClientSession(timeout=timeout_cfg) as session:
-                async with session.get(ping_url, headers=headers) as resp:
-                    elapsed_ms = (time.perf_counter() - start_time) * 1000.0
-                    node.last_latency_ms = round(elapsed_ms, 2)
-                    node.last_checked_at = datetime.now(timezone.utc).isoformat()
+        timeout_cfg = aiohttp.ClientTimeout(total=self._health_check_timeout)
 
-                    if resp.status in (200, 204):
-                        node.is_healthy = True
-                        self._failure_timestamps.pop(node.name, None)
-                        logger.debug(f"Nodo '{node.name}' saludable: {node.last_latency_ms}ms")
-                        return True
-                    else:
-                        node.is_healthy = False
-                        self._failure_timestamps[node.name] = time.time()
-                        logger.warning(f"Nodo '{node.name}' respondió status={resp.status}")
-                        return False
+        close_session = False
+        if session is None:
+            session = aiohttp.ClientSession(timeout=timeout_cfg)
+            close_session = True
+
+        try:
+            # Reutilizar la ClientSession proporcionada para evitar reconexiones/overhead
+            async with session.get(ping_url, headers=headers, timeout=timeout_cfg) as resp:
+                elapsed_ms = (time.perf_counter() - start_time) * 1000.0
+                node.last_latency_ms = round(elapsed_ms, 2)
+                node.last_checked_at = datetime.now(timezone.utc).isoformat()
+
+                if resp.status in (200, 204):
+                    node.is_healthy = True
+                    self._failure_timestamps.pop(node.name, None)
+                    logger.debug(f"Nodo '{node.name}' saludable: {node.last_latency_ms}ms")
+                    return True
+                else:
+                    node.is_healthy = False
+                    self._failure_timestamps[node.name] = time.time()
+                    logger.warning(f"Nodo '{node.name}' respondió status={resp.status}")
+                    return False
         except Exception as e:
             elapsed_ms = (time.perf_counter() - start_time) * 1000.0
             node.last_latency_ms = round(elapsed_ms, 2)
@@ -188,6 +199,9 @@ class ClusterManager(IClusterManager):
             self._failure_timestamps[node.name] = time.time()
             logger.warning(f"Fallo al contactar nodo '{node.name}' ({ping_url}): {e}")
             return False
+        finally:
+            if close_session:
+                await session.close()
 
     async def check_health_all(self) -> Dict[str, bool]:
         """
@@ -196,8 +210,11 @@ class ClusterManager(IClusterManager):
         Returns:
             Dict[str, bool]: Mapa de nombre de nodo a estado de salud.
         """
-        tasks = [self.check_health_node(node) for node in self._nodes]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        # Reutilizar una única ClientSession para todos los sondeos concurrentes
+        timeout_cfg = aiohttp.ClientTimeout(total=self._health_check_timeout)
+        async with aiohttp.ClientSession(timeout=timeout_cfg) as session:
+            tasks = [self.check_health_node(node, session=session) for node in self._nodes]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
 
         health_map: Dict[str, bool] = {}
         for node, res in zip(self._nodes, results):
