@@ -27,3 +27,9 @@
 **Learning:** Querying USD prims by name pattern or attribute filter in `USDInspector.find_prims_by_query()` previously computed string representations (`str(prim.GetPath())`) and re-compiled regular expressions (`re.search(name_pattern, path_str, re.IGNORECASE)`) for every traversed prim in large stage hierarchies. Additionally, checking `hasattr(prim, "GetAttribute")` repeatedly inside inner filter loops added method lookup overhead.
 
 **Action:** Pre-compile regex search patterns once outside traversal loops, cache `hasattr` checks per prim, and order cheap filter operations (such as type checks) before string path conversions and regex evaluations.
+
+## 2026-04-03 - Shared aiohttp ClientSession Connection Pooling for Concurrent Cluster Pings
+
+**Learning:** Instantiating separate `aiohttp.ClientSession` objects inside individual async tasks during concurrent health probes (`check_health_all()`) creates $N$ separate HTTP client instances, connector pools, TCP handshakes, and SSL contexts. Sharing a single `ClientSession` across all concurrent tasks in `asyncio.gather()` allows socket/connection reuse, eliminates redundant object allocations, and accelerates cluster status polling.
+
+**Action:** Accept an optional `session: Optional[aiohttp.ClientSession]` parameter in item-level network functions and instantiate a single shared session at the batch manager level (`async with ClientSession() as session:`).
