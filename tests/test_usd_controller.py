@@ -62,3 +62,16 @@ class TestUSDController:
         res_undefined = controller.execute_code(code_undefined)
         assert res_undefined["success"] is False
         assert "is not defined" in res_undefined["error_msg"]
+
+    def test_execute_code_restricted_builtins_removed(self):
+        """Test that dangerous builtins like eval and open are not accessible in execution scope."""
+        controller = USDController()
+        code_eval = "x = eval('1 + 1')"
+        res_eval = controller.execute_code(code_eval)
+        assert res_eval["success"] is False
+        assert "forbidden builtin function 'eval()'" in res_eval["error_msg"]
+
+        code_open = "f = open('/etc/passwd', 'r')"
+        res_open = controller.execute_code(code_open)
+        assert res_open["success"] is False
+        assert "name 'open' is not defined" in res_open["error_msg"]
