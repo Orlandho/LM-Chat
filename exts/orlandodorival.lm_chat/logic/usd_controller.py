@@ -78,9 +78,13 @@ class USDController:
         if not is_valid:
             return {"success": False, "error_msg": violation_err}
 
-        # Prepare execution environment with safe bindings, explicit builtins and inspector
+        # Prepare execution environment with safe bindings, restricted builtins, and inspector
+        safe_builtins = __builtins__.copy() if isinstance(__builtins__, dict) else __builtins__.__dict__.copy()
+        for forbidden in self._policy.config.forbidden_builtins + ("open",):
+            safe_builtins.pop(forbidden, None)
+
         exec_globals = {
-            "__builtins__": __builtins__,
+            "__builtins__": safe_builtins,
             "omni": __import__('omni') if omni is not None else None,
             "pxr": pxr,
             "Usd": Usd,
