@@ -206,6 +206,22 @@ for i in range(150):
         assert valid is False
         assert "forbidden builtin function '__import__()'" in err
 
+    def test_attribute_based_builtins_bypass_blocked(self):
+        """Bloquea intentos de evasión utilizando __builtins__.eval(), __builtins__.exec(), o __builtins__.__import__()."""
+        policy = SpatialSecurityPolicy()
+
+        cases = [
+            ("__builtins__.eval('2 + 2')", "eval()"),
+            ("__builtins__.exec('import os')", "exec()"),
+            ("__builtins__.__import__('os')", "__import__()"),
+            ("builtins.compile('pass', '', 'exec')", "compile()"),
+        ]
+
+        for code, func_label in cases:
+            valid, err = policy.validate_code(code)
+            assert valid is False, f"El intento de evasión de política debió ser bloqueado: {code}"
+            assert f"forbidden builtin function '{func_label}'" in err
+
     def test_usd_controller_group_prims_policy_limits(self):
         """Verifica que USDController.group_prims respete el límite de prims y rutas destino protegidas."""
         from logic.usd_controller import USDController

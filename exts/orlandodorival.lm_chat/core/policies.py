@@ -147,13 +147,19 @@ class SpatialSecurityPolicy(IAgentPolicy):
                             f"Security Policy Violation: Execution of forbidden builtin function '{func_name}()' is blocked.",
                         )
 
-                # Llamadas a atributos (ej. os.system(...), os.remove(...))
+                # Llamadas a atributos (ej. os.system(...), os.remove(...), __builtins__.eval(...))
                 elif isinstance(node.func, ast.Attribute):
                     attr_name = node.func.attr
                     if attr_name in self.config.forbidden_os_attributes:
                         return (
                             False,
                             f"Security Policy Violation: Dangerous system operation '{attr_name}()' is blocked.",
+                        )
+                    # Security Guardrail: Prevent AST policy bypass via __builtins__.eval(...) or builtins.exec(...)
+                    if attr_name in self.config.forbidden_builtins:
+                        return (
+                            False,
+                            f"Security Policy Violation: Execution of forbidden builtin function '{attr_name}()' is blocked.",
                         )
 
             # C. Detección de bucles infinitos estáticos (while True: sin break)
