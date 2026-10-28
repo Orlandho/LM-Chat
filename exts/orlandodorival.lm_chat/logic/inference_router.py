@@ -42,6 +42,11 @@ REASONING_MODEL_PATTERNS: List[str] = [
     r"gemini-3(\.[0-9]+)?",
 ]
 
+_THINK_OPEN_TAG: str = "<think>"
+_THINK_CLOSE_TAG: str = "</think>"
+_THINK_OPEN_LEN: int = len(_THINK_OPEN_TAG)
+_THINK_CLOSE_LEN: int = len(_THINK_CLOSE_TAG)
+
 
 def is_reasoning_model(model_name: str) -> bool:
     """Evalúa si un modelo cuenta con capacidades de razonamiento extendido (Plan 01)."""
@@ -79,19 +84,21 @@ class StreamingReasoningParser:
 
         while self._buffer:
             if not self._in_think:
-                tag_idx = self._buffer.find("<think>")
+                tag_idx = self._buffer.find(_THINK_OPEN_TAG)
                 if tag_idx != -1:
                     if tag_idx > 0:
                         content_part = self._buffer[:tag_idx]
                         results.append({"type": "content", "text": content_part})
-                    self._buffer = self._buffer[tag_idx + len("<think>"):]
+                    self._buffer = self._buffer[tag_idx + _THINK_OPEN_LEN:]
                     self._in_think = True
                 else:
-                    # Comprobar si el final del buffer tiene un prefijo parcial de <think>
+                    # Optimization: Check for longest matching partial tag prefix at buffer end
+                    # using startswith on constant tag string rather than generating sub-slice strings.
                     held = 0
-                    for i in range(1, len("<think>")):
-                        if self._buffer.endswith("<think>"[:i]):
-                            held = i
+                    buf_len = len(self._buffer)
+                    for k in range(min(buf_len, _THINK_OPEN_LEN - 1), 0, -1):
+                        if _THINK_OPEN_TAG.startswith(self._buffer[-k:]):
+                            held = k
                             break
                     if held > 0:
                         emit_part = self._buffer[:-held]
@@ -104,18 +111,21 @@ class StreamingReasoningParser:
                         self._buffer = ""
                         break
             else:
-                tag_idx = self._buffer.find("</think>")
+                tag_idx = self._buffer.find(_THINK_CLOSE_TAG)
                 if tag_idx != -1:
                     if tag_idx > 0:
                         reasoning_part = self._buffer[:tag_idx]
                         results.append({"type": "reasoning", "text": reasoning_part})
-                    self._buffer = self._buffer[tag_idx + len("</think>"):]
+                    self._buffer = self._buffer[tag_idx + _THINK_CLOSE_LEN:]
                     self._in_think = False
                 else:
+                    # Optimization: Check for longest matching partial tag prefix at buffer end
+                    # using startswith on constant tag string rather than generating sub-slice strings.
                     held = 0
-                    for i in range(1, len("</think>")):
-                        if self._buffer.endswith("</think>"[:i]):
-                            held = i
+                    buf_len = len(self._buffer)
+                    for k in range(min(buf_len, _THINK_CLOSE_LEN - 1), 0, -1):
+                        if _THINK_CLOSE_TAG.startswith(self._buffer[-k:]):
+                            held = k
                             break
                     if held > 0:
                         emit_part = self._buffer[:-held]
