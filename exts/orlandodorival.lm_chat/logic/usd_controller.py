@@ -26,13 +26,14 @@ except ImportError:
     Sdf = None
     Gf = None
 
+from core.interfaces import IUSDController
 from core.policies import SpatialSecurityPolicy, AgentPolicyConfig
 from logic.usd_inspector import USDInspector
 
 logger = logging.getLogger(__name__)
 
 
-class USDController:
+class USDController(IUSDController):
     """Handles execution of dynamic USD python code with safety policies and Undo/Redo."""
 
     # Maximum payload limit (100KB) to prevent DoS via memory/CPU exhaustion
@@ -90,28 +91,102 @@ class USDController:
             "Gf": Gf,
             "inspector": self._inspector,
             "controller": self,
+            "create_prim": self.create_prim,
         }
 
         undo_opened = False
-        try:
-            # Wrap execution in an Undo/Redo block to guarantee native Ctrl+Z support
-            if omni and hasattr(omni, "kit") and hasattr(omni.kit, "undo") and hasattr(omni.kit.undo, "begin"):
-                try:
-                    omni.kit.undo.begin()
-                    undo_opened = True
-                except Exception:
-                    pass
+        has_undo = omni and hasattr(omni, "kit") and hasattr(omni.kit, "undo")
+        if has_undo and hasattr(omni.kit.undo, "begin_group"):
+            try:
+                omni.kit.undo.begin_group()
+                undo_opened = True
+            except Exception as e:
+                logger.warning(f"No se pudo iniciar el grupo de undo: {e}")
 
+        try:
             exec(python_code, exec_globals)
             return {"success": True}
         except Exception as exec_err:
-            return {"success": False, "error_msg": str(exec_err)}
-        finally:
-            if undo_opened and omni and hasattr(omni, "kit") and hasattr(omni.kit, "undo") and hasattr(omni.kit.undo, "end"):
+            rolled_back = False
+            if undo_opened and has_undo and hasattr(omni.kit.undo, "end_group"):
                 try:
-                    omni.kit.undo.end()
-                except Exception:
-                    pass
+                    omni.kit.undo.end_group()
+                    undo_opened = False
+                    if hasattr(omni.kit.undo, "undo"):
+                        omni.kit.undo.undo()
+                        rolled_back = True
+                        logger.info("Reversión automática de undo ejecutada tras fallo parcial de código.")
+                except Exception as rb_err:
+                    logger.error(f"Fallo durante la reversión automática de undo: {rb_err}")
+            res = {"success": False, "error_msg": str(exec_err)}
+            if rolled_back:
+                res["partial_changes_rolled_back"] = True
+            return res
+        finally:
+            if undo_opened and has_undo and hasattr(omni.kit.undo, "end_group"):
+                try:
+                    omni.kit.undo.end_group()
+                except Exception as e:
+                    logger.warning(f"No se pudo cerrar el grupo de undo: {e}")
+
+    def create_prim(
+        self,
+        prim_type: str,
+        prim_path: Optional[str] = None,
+        attributes: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Crea un prim de forma no-destructiva mediante CreatePrimWithDefaultXform (Command Pattern).
+
+        Args:
+            prim_type: Tipo de prim a crear (ej. 'Cube', 'Sphere', 'Xform', 'DistantLight').
+            prim_path: Ruta destino opcional en el Stage (ej. '/World/Cube').
+            attributes: Atributos o propiedades iniciales opcionales.
+
+        Returns:
+            Dict[str, Any]: Resultado estructurado de la creación.
+        """
+        if prim_path and self._policy.is_prim_protected(prim_path):
+            return {"success": False, "error_msg": f"El prim '{prim_path}' está protegido por el sistema."}
+
+        try:
+            if omni and hasattr(omni, "kit") and hasattr(omni.kit, "commands"):
+                cmd_kwargs: Dict[str, Any] = {
+                    "prim_type": prim_type,
+                    "attributes": attributes or {},
+                }
+                if prim_path:
+                    cmd_kwargs["prim_path"] = prim_path
+
+                cmd_res = omni.kit.commands.execute(
+                    "CreatePrimWithDefaultXform",
+                    **cmd_kwargs,
+                )
+                if isinstance(cmd_res, tuple):
+                    status, res = cmd_res[0], cmd_res[1] if len(cmd_res) > 1 else None
+                else:
+                    status, res = bool(cmd_res), None
+
+                if not status:
+                    return {
+                        "success": False,
+                        "error_msg": f"Error ejecutando CreatePrimWithDefaultXform para '{prim_path or prim_type}': {res}",
+                    }
+                return {
+                    "success": True,
+                    "prim_path": prim_path,
+                    "prim_type": prim_type,
+                    "result": res,
+                }
+            else:
+                return {
+                    "success": True,
+                    "prim_path": prim_path,
+                    "prim_type": prim_type,
+                    "note": "Ejecución simulada en entorno headless",
+                }
+        except Exception as e:
+            return {"success": False, "error_msg": str(e)}
 
     def transform_prim(
         self,
@@ -150,7 +225,14 @@ class USDController:
                 if scale is not None:
                     kwargs["scale"] = scale
 
-                omni.kit.commands.execute("TransformPrimCommand", **kwargs)
+                cmd_res = omni.kit.commands.execute("TransformPrimCommand", **kwargs)
+                if isinstance(cmd_res, tuple):
+                    status, res = cmd_res[0], cmd_res[1] if len(cmd_res) > 1 else None
+                else:
+                    status, res = bool(cmd_res), None
+
+                if not status:
+                    return {"success": False, "error_msg": f"Error ejecutando TransformPrimCommand para {prim_path}: {res}"}
                 return {"success": True, "path": prim_path}
             else:
                 return {"success": True, "path": prim_path, "note": "Ejecución simulada en entorno headless"}
@@ -173,11 +255,18 @@ class USDController:
 
         try:
             if omni and hasattr(omni, "kit") and hasattr(omni.kit, "commands"):
-                omni.kit.commands.execute(
+                cmd_res = omni.kit.commands.execute(
                     "BindMaterialCommand",
                     prim_path=prim_path,
                     material_path=material_path,
                 )
+                if isinstance(cmd_res, tuple):
+                    status, res = cmd_res[0], cmd_res[1] if len(cmd_res) > 1 else None
+                else:
+                    status, res = bool(cmd_res), None
+
+                if not status:
+                    return {"success": False, "error_msg": f"Error ejecutando BindMaterialCommand para {prim_path}: {res}"}
                 return {"success": True, "prim_path": prim_path, "material_path": material_path}
             else:
                 return {"success": True, "prim_path": prim_path, "material_path": material_path, "note": "Simulado"}
@@ -208,11 +297,18 @@ class USDController:
 
         try:
             if omni and hasattr(omni, "kit") and hasattr(omni.kit, "commands"):
-                omni.kit.commands.execute(
+                cmd_res = omni.kit.commands.execute(
                     "GroupPrimsCommand",
                     prim_paths=prim_paths,
                     parent_path=parent_path,
                 )
+                if isinstance(cmd_res, tuple):
+                    status, res = cmd_res[0], cmd_res[1] if len(cmd_res) > 1 else None
+                else:
+                    status, res = bool(cmd_res), None
+
+                if not status:
+                    return {"success": False, "error_msg": f"Error ejecutando GroupPrimsCommand para {parent_path}: {res}"}
                 return {"success": True, "grouped_count": len(prim_paths), "parent_path": parent_path}
             else:
                 return {"success": True, "grouped_count": len(prim_paths), "parent_path": parent_path, "note": "Simulado"}
@@ -236,12 +332,19 @@ class USDController:
 
         try:
             if omni and hasattr(omni, "kit") and hasattr(omni.kit, "commands"):
-                omni.kit.commands.execute(
+                cmd_res = omni.kit.commands.execute(
                     "ChangePropertyCommand",
                     prop_path=f"{prim_path}.{attr_name}",
                     value=value,
                     prev=None,
                 )
+                if isinstance(cmd_res, tuple):
+                    status, res = cmd_res[0], cmd_res[1] if len(cmd_res) > 1 else None
+                else:
+                    status, res = bool(cmd_res), None
+
+                if not status:
+                    return {"success": False, "error_msg": f"Error ejecutando ChangePropertyCommand para {prim_path}.{attr_name}: {res}"}
                 return {"success": True, "prim_path": prim_path, "attribute": attr_name, "value": value}
             else:
                 return {"success": True, "prim_path": prim_path, "attribute": attr_name, "value": value, "note": "Simulado"}

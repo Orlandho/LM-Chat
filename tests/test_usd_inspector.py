@@ -335,8 +335,8 @@ class TestUSDInspectorAndEditing:
     def test_tc_edt_004_mass_edit_undo_compound_block(self):
         """TC-EDT-004 (Plan 2): Deshacer (Ctrl+Z) de edición masiva agrupada en un solo bloque undo."""
         controller = USDController()
-        omni.kit.undo.begin.reset_mock()
-        omni.kit.undo.end.reset_mock()
+        omni.kit.undo.begin_group.reset_mock()
+        omni.kit.undo.end_group.reset_mock()
 
         script = """
 for i in range(10):
@@ -345,9 +345,9 @@ for i in range(10):
         res = controller.execute_code(script)
         assert res["success"] is True
 
-        # Debe abrir y cerrar exactamente un bloque undo para los 10 cambios
-        omni.kit.undo.begin.assert_called_once()
-        omni.kit.undo.end.assert_called_once()
+        # Debe abrir y cerrar exactamente un bloque undo para los 10 cambios (Kit 107.3.7 upstream)
+        omni.kit.undo.begin_group.assert_called_once()
+        omni.kit.undo.end_group.assert_called_once()
 
     def test_layer_stack_real_usd_is_dirty_and_property_support(self):
         """Verifica que el estado de capas detecte tanto IsDirty() de pxr como propiedad dirty."""

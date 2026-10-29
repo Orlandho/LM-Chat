@@ -3,6 +3,7 @@ import sys
 import os
 import asyncio
 import unittest
+from contextlib import contextmanager
 from types import ModuleType
 from unittest.mock import MagicMock, AsyncMock
 
@@ -17,6 +18,68 @@ for p in [ext_pkg_root, exts_root, repo_root]:
 
 # Mocks para evadir los requisitos de ejecución nativa de Omniverse Kit.
 # Permite que Jules y los desarrolladores puedan ejecutar pytest en cualquier entorno sin lanzar el software 3D.
+
+class StrictKitUndoDouble(ModuleType):
+    """Strict test double matching upstream omni.kit.commands 1.4.10 / omni.kit.undo (Kit 107.3.7).
+    Explicitly exposes begin_group, end_group, group, undo, redo, can_undo, can_redo,
+    begin_disabled, end_disabled, disabled.
+    Strictly forbids begin() and end(), raising AttributeError on access so MagicMock cannot invent them.
+    """
+    __all__ = [
+        "begin_disabled", "begin_group", "can_redo", "can_repeat", "can_undo",
+        "clear_history", "clear_stack", "disabled", "end_disabled", "end_group",
+        "execute", "get_history", "get_redo_stack", "get_undo_stack", "group",
+        "redo", "repeat", "subscribe_on_change", "subscribe_on_change_detailed",
+        "undo", "unsubscribe_on_change", "unsubscribe_on_change_detailed"
+    ]
+
+    def __init__(self):
+        super().__init__("omni.kit.undo")
+        self.begin_group = MagicMock(name="begin_group")
+        self.end_group = MagicMock(name="end_group")
+        self.undo = MagicMock(name="undo", return_value=True)
+        self.redo = MagicMock(name="redo", return_value=True)
+        self.can_undo = MagicMock(name="can_undo", return_value=True)
+        self.can_redo = MagicMock(name="can_redo", return_value=True)
+        self.begin_disabled = MagicMock(name="begin_disabled")
+        self.end_disabled = MagicMock(name="end_disabled")
+        self.clear_history = MagicMock(name="clear_history")
+        self.clear_stack = MagicMock(name="clear_stack")
+        self.get_history = MagicMock(name="get_history", return_value=[])
+        self.get_redo_stack = MagicMock(name="get_redo_stack", return_value=[])
+        self.get_undo_stack = MagicMock(name="get_undo_stack", return_value=[])
+        self.subscribe_on_change = MagicMock(name="subscribe_on_change")
+        self.subscribe_on_change_detailed = MagicMock(name="subscribe_on_change_detailed")
+        self.unsubscribe_on_change = MagicMock(name="unsubscribe_on_change")
+        self.unsubscribe_on_change_detailed = MagicMock(name="unsubscribe_on_change_detailed")
+
+    @contextmanager
+    def group(self):
+        self.begin_group()
+        try:
+            yield
+        finally:
+            self.end_group()
+
+    @contextmanager
+    def disabled(self):
+        self.begin_disabled()
+        try:
+            yield
+        finally:
+            self.end_disabled()
+
+    def __dir__(self):
+        return list(self.__all__)
+
+    def __getattr__(self, name: str):
+        if name in ("begin", "end"):
+            raise AttributeError(f"module 'omni.kit.undo' has no attribute '{name}' (Kit 107.3.7 upstream invariant)")
+        if name not in self.__all__:
+            raise AttributeError(f"module 'omni.kit.undo' has no attribute '{name}'")
+        val = MagicMock(name=name)
+        setattr(self, name, val)
+        return val
 
 class AsyncTestCase(unittest.IsolatedAsyncioTestCase):
     """Clase base emulada para tests asíncronos de Omniverse."""
@@ -69,6 +132,16 @@ class AutoMockModule(ModuleType):
             return sys.modules[submod_name]
         if name == 'AsyncTestCase':
             return AsyncTestCase
+        if self.__name__ == 'omni.kit':
+            if name == 'undo':
+                return sys.modules.get('omni.kit.undo')
+        if self.__name__ == 'omni.kit.commands':
+            if name == 'execute':
+                val = MagicMock(name="execute", return_value=(True, {"status": "ok"}))
+                setattr(self, name, val)
+                return val
+            if name == 'undo':
+                return sys.modules.get('omni.kit.undo')
         if self.__name__ == 'omni.ui':
             if name == 'Label':
                 val = MagicMock(side_effect=_mock_label_factory)
@@ -114,6 +187,8 @@ class OmniLoader:
         self.fullname = fullname
 
     def create_module(self, spec):
+        if self.fullname == 'omni.kit.undo':
+            return sys.modules.get('omni.kit.undo') or StrictKitUndoDouble()
         mod = AutoMockModule(self.fullname)
         mod.__path__ = []
         if self.fullname == 'omni.kit.test':
@@ -127,10 +202,14 @@ class OmniLoader:
 if not any(isinstance(finder, OmniFinder) for finder in sys.meta_path):
     sys.meta_path.insert(0, OmniFinder())
 
+# Instanciar y registrar el doble estricto de omni.kit.undo
+strict_kit_undo = StrictKitUndoDouble()
+sys.modules['omni.kit.undo'] = strict_kit_undo
+
 # Registrar los módulos base en sys.modules
 base_modules = [
     'omni', 'omni.ext', 'omni.ui', 'omni.usd', 'omni.kit',
-    'omni.kit.test', 'omni.kit.ui_test', 'omni.appwindow',
+    'omni.kit.commands', 'omni.kit.test', 'omni.kit.ui_test', 'omni.appwindow',
     'pxr', 'pxr.Usd', 'pxr.UsdGeom', 'pxr.Gf', 'pxr.Sdf',
     'omni.lm_chat', 'orlandoexplorer', 'orlandoexplorer.ia_test'
 ]
@@ -149,6 +228,14 @@ for mod_name in base_modules:
         parent_name, child_name = mod_name.rsplit('.', 1)
         if parent_name in sys.modules:
             setattr(sys.modules[parent_name], child_name, sys.modules[mod_name])
+
+# Enlazar explícitamente el doble estricto de undo
+if 'omni.kit' in sys.modules:
+    setattr(sys.modules['omni.kit'], 'undo', strict_kit_undo)
+if 'omni.kit.commands' in sys.modules:
+    setattr(sys.modules['omni.kit.commands'], 'undo', strict_kit_undo)
+    if not hasattr(sys.modules['omni.kit.commands'], 'execute'):
+        sys.modules['omni.kit.commands'].execute = MagicMock(name="execute", return_value=(True, {"status": "ok"}))
 
 # Configurar funciones mock específicas para omni.lm_chat y retrocompatibilidad con test_hello_world
 class MockIExt:
