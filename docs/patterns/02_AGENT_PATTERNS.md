@@ -1,41 +1,68 @@
-# Patrones de Diseño del Agente (IA)
+---
+title: "Patrones de Diseño del Agente Cognitivo (ReAct e Inferencia)"
+tipo: "arquitectura"
+modulo: "patterns"
+version: "1.2.0"
+estado: "vigente"
+fecha_revision: "2026-10-28"
+commit_referencia: "c0c41db"
+autor: "Orlando Dorival"
+aliases:
+  - "Patrones del Agente"
+  - "Bucle ReAct"
+  - "Rolling Buffer"
+tags:
+  - "patrones"
+  - "react"
+  - "agente"
+  - "memoria"
+  - "tokens"
+---
 
-Este documento define la arquitectura algorítmica y los mecanismos de memoria del Agente Híbrido, garantizando su capacidad de razonamiento iterativo y eficiencia de procesamiento local.
+# Patrones de Diseño del Agente Cognitivo (ReAct e Inferencia)
+
+Este documento define la arquitectura algorítmica y los mecanismos de memoria del Agente de IA Espacial en **LM-Chat™**, garantizando su capacidad de razonamiento iterativo, autorreflexión ante fallos y eficiencia de procesamiento local.
+
+---
 
 ## 1. Patrón ReAct y Autorreflexión
 
-El núcleo cognitivo de la IA se asienta sobre el patrón **ReAct** (Reasoning and Acting). El `AgentManager` actúa como orquestador del bucle de reflexión asíncrono para ejecutar operaciones. En lugar de una generación lineal *zero-shot*, el agente operará con un "Sistema 2" de pensamiento lento e iterativo.
+El núcleo cognitivo de la IA se asienta sobre el patrón **ReAct** (Reasoning and Acting). `AgentManager` actúa como orquestador del bucle de reflexión asíncrono para ejecutar operaciones. En lugar de una generación lineal *zero-shot*, el agente opera con un ciclo reflexivo de pensamiento, acción y observación:
 
-La secuencia de control consta de:
-1. **Pensamiento:** La IA planea y expone lógicamente su deducción.
-2. **Acción:** Emisión del código final en Python (usando las APIs permitidas de Omniverse).
-3. **Ejecución (Omniverse):** Ejecución del código Python generado dinámicamente mediante el motor subyacente.
-4. **Observación:** Captura del resultado de la ejecución. Si ocurre un fallo topológico o de sintaxis, la pila de error se inyecta como una nueva observación para forzar la corrección en el siguiente ciclo.
+1. **Pensamiento (Reasoning):** El modelo analiza el requerimiento del usuario y los prims presentes en el Stage. Si es un modelo de razonamiento profundo (DeepSeek-R1, o1/o3, Claude Thinking), emite tokens de pensamiento canalizados al widget `CollapsibleFrame`.
+2. **Acción (Act):** Emisión del bloque de código Python delimitado por etiquetas ` ```python y ``` `.
+3. **Validación y Ejecución (Observation):** `USDController` valida el código mediante `SpatialSecurityPolicy` (AST) y lo ejecuta en el Stage dentro de un bloque `omni.kit.undo`.
+4. **Reflexión ante Fallos:** Si ocurre una excepción (`Sdf.PathError`, `Tf.DiagnosticMark`), la traza se captura y se reinyecta al modelo en un prompt de autorreflexión (hasta **3 intentos totales: 1 inicial + 2 reintentos**).
 
-### Diagrama de Flujo del Bucle de Reflexión
+### Diagrama de Flujo del Bucle ReAct
 
 ```mermaid
-graph TD;
-    Start([Usuario envía un Prompt]) --> Think[Pensamiento: Análisis de Tarea];
-    Think --> Act[Acción: Generación de Código Python];
-    Act --> Exec[Ejecución en USD Controller];
-    Exec --> Check{¿Código Exitoso?};
+flowchart TD
+    Start([Usuario envía un Prompt]) --> Think["Pensamiento: Análisis de Tarea"];
+    Think --> Act["Acción: Generación de Código Python"];
+    Act --> Exec["Ejecución en USDController (Sandbox AST)"];
+    Exec --> Check{"¿Código Exitoso?"};
 
-    Check -- Sí --> ObserveSuccess[Observación: Resultado Exitoso];
-    ObserveSuccess --> End([Notificación al Usuario UI]);
+    Check -- Sí --> ObserveSuccess["Observación: Mutación Exitosa en Stage"];
+    ObserveSuccess --> End([Notificación al Usuario en UI]);
 
-    Check -- No --> ObserveError[Observación: Captura de Excepción / Error];
-    ObserveError --> Think;
+    Check -- No (Intentos < 3) --> ObserveError["Observación: Captura de Excepción USD"];
+    ObserveError --> Reflect["Inyección de Traceback en Historial"];
+    Reflect --> Think;
+
+    Check -- No (Intentos = 3) --> MaxRetries["DiagnosticsEngine: Tarjeta de Error"];
+    MaxRetries --> End;
 ```
+
+---
 
 ## 2. Optimización de la Ventana de Contexto (Context Window)
 
-Para mantener la interoperabilidad con Modelos de Lenguaje Grandes (LLM) locales y eficientes de código abierto (como Llama o Gemma) en hardware de consumidor (Consumer GPUs), la administración de memoria del orquestador debe ser agresiva y predictiva.
+Para mantener la interoperabilidad con modelos locales y de código abierto (Llama, Qwen, DeepSeek) en GPUs de consumidor, la administración de memoria del orquestador aplica la técnica de **Compresión de Búfer Rodante (Rolling Buffer Compression)**:
 
-Se empleará la táctica de **Resumen de Ventana Rodante (Rolling Buffer Compression)**.
+- Cuando la longitud combinada del historial de conversación y los ciclos de reflexión de errores supera el límite de seguridad (por defecto 8,192 tokens o configurado en `InferenceConfig.max_tokens`), el sistema aplica compresión activa:
+  - Mantiene intactas las directrices fundamentales (Prompt del Sistema y metadatos de las APIs).
+  - Conserva los últimos 2 turnos conversacionales completos.
+  - Sintetiza la cadena de errores pasados preservando únicamente la intención original y descartando las implementaciones erróneas ya superadas.
 
-Cuando la longitud combinada del historial de conversación y los ciclos de reflexión de errores rebase un límite de seguridad referencial de **8192 tokens**, el sistema aplicará una compresión activa:
-- Mantendrá intactas las directrices fundamentales (Prompt del Sistema y metadatos de las APIs).
-- Sintetizará el flujo conversacional y la cadena de errores pasados preservando únicamente la intención original (el *por qué* de las acciones), descartando las implementaciones erróneas ya superadas.
-
-Esto asegura prevenir fallos de inferencia OOM (Out Of Memory) en el servidor LLM local y garantiza la velocidad (TPS) sin perder la coherencia contextual del requerimiento original.
+Esto asegura prevenir fallos de inferencia por agotamiento de memoria (OOM) en el servidor LLM local y garantiza la velocidad de generación (tokens/s) sin perder la coherencia contextual del requerimiento original.

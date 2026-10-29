@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="app.diagrams.net" modified="2026-10-28T23:30:00.000Z" agent="Antigravity-DocEngine" version="24.7.17" type="device">
+  <diagram id="02_component_architecture" name="LM-Chat: Arquitectura de Componentes, Interfaces y Dependencias">
+    <mxGraphModel dx="1600" dy="1200" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1800" pageHeight="1400" background="#0b0f19" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        
+        <!-- TITULO PRINCIPAL -->
+        <mxCell id="title_node" value="&lt;b&gt;LM-Chat™ &amp;mdash; LM-Chat: Arquitectura de Componentes, Interfaces y Dependencias&lt;/b&gt;&lt;br/&gt;&lt;font color='#94a3b8'&gt;NVIDIA Omniverse Kit Extension (orlandodorival.lm_chat) &amp;bull; Version 1.2.0&lt;/font&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=18;fontColor=#38bdf8;" vertex="1" parent="1">
+          <mxGeometry x="50" y="20" width="1700" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- CONTENEDOR PRINCIPAL DEL DIAGRAMA -->
+        <mxCell id="canvas_box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#0f172a;strokeColor=#1e293b;strokeWidth=2;arcSize=6;" vertex="1" parent="1">
+          <mxGeometry x="50" y="90" width="1700" height="1250" as="geometry" />
+        </mxCell>
+
+        <!-- FUENTE MERMAID / ESPECIFICACION ESTRUCTURADA -->
+        <mxCell id="spec_node" value="&lt;h3 style='color:#38bdf8; margin:0 0 8px 0;'&gt;Especificacion de Arquitectura / Flujo Estructurado&lt;/h3&gt;&lt;pre style='color:#e2e8f0; font-family:Consolas, monospace; font-size:11px; white-space:pre-wrap;'&gt;graph TD
+    classDef iface fill:#0f172a,stroke:#38bdf8,stroke-width:2px,color:#38bdf8,stroke-dasharray: 5 5;
+    classDef uiLayer fill:#1e293b,stroke:#0284c7,stroke-width:2px,color:#f8fafc;
+    classDef logicLayer fill:#1e1e2e,stroke:#a855f7,stroke-width:2px,color:#f8fafc;
+    classDef coreLayer fill:#14532d,stroke:#22c55e,stroke-width:2px,color:#f8fafc;
+    classDef mcpLayer fill:#1c1917,stroke:#f59e0b,stroke-width:2px,color:#f8fafc;
+    classDef storeLayer fill:#3b0764,stroke:#ec4899,stroke-width:2px,color:#f8fafc;
+
+    subgraph UI_LAYER [&quot;Capa de Presentacion (ui/)&quot;]
+        CW[&quot;ChatWindow (omni.ui.Window)&quot;]:::uiLayer
+        CD[&quot;ChatDelegate (Model-Delegate-View)&quot;]:::uiLayer
+        SW[&quot;SettingsWindow (Modal Settings)&quot;]:::uiLayer
+        CF[&quot;CollapsibleFrame (omni.ui)&quot;]:::uiLayer
+        PC[&quot;PlanCard (UI Widget con [Ejecutar] y [Cancelar])&quot;]:::uiLayer
+    end
+
+    subgraph INTERFACES [&quot;Contratos Tipados (core/interfaces.py)&quot;]
+        I_ROUTER[&quot;IInferenceRouter&quot;]:::iface
+        I_USD_CTRL[&quot;IUSDController&quot;]:::iface
+        I_USD_INSP[&quot;IUSDInspector&quot;]:::iface
+        I_POLICY[&quot;IAgentPolicy&quot;]:::iface
+        I_MCP[&quot;IMCPClientRegistry&quot;]:::iface
+        I_HISTORY[&quot;IChatHistoryManager&quot;]:::iface
+        I_SETTINGS[&quot;ISettingsManager&quot;]:::iface
+        I_CLUSTER[&quot;IClusterManager&quot;]:::iface
+        I_VRAM[&quot;ILMStudioVRAMManager&quot;]:::iface
+    end
+
+    subgraph LOGIC_LAYER [&quot;Capa de Negocio y Cognicion (logic/)&quot;]
+        AM[&quot;AgentManager (Bucle ReAct 3 intentos totales)&quot;]:::logicLayer
+        IR[&quot;InferenceRouter (Multi-Provider Gateway)&quot;]:::logicLayer
+        SRP[&quot;StreamingReasoningParser (&lt;think&gt; Tag Parser)&quot;]:::logicLayer
+        UC[&quot;USDController (Sandbox con __builtins__ y Undo)&quot;]:::logicLayer
+        UI_INSP[&quot;USDInspector (Auditoria de Assets y Layer Stack)&quot;]:::logicLayer
+        SP[&quot;SpatialSecurityPolicy (core/policies.py AST)&quot;]:::logicLayer
+        CH[&quot;LocalChatHistoryManager (Persistencia Atomica JSON)&quot;]:::logicLayer
+        SM[&quot;SettingsManager (~/.omni_lm_chat/settings.json)&quot;]:::logicLayer
+        CM[&quot;ClusterManager (Failover y Balanceo)&quot;]:::logicLayer
+        VM[&quot;LMStudioVRAMManager (Descarga VRAM)&quot;]:::logicLayer
+        DE[&quot;DiagnosticsEngine &amp; Logger&quot;]:::logicLayer
+    end
+
+    subgraph MCP_LAYER [&quot;Subsistema de Herramientas MCP (mcp/)&quot;]
+        OMCP[&quot;OmniMCPRegistry (Registro Dinamico)&quot;]:::mcpLayer
+        MSC[&quot;MCPServerConnection (Subprocess stdio)&quot;]:::mcpLayer
+    end
+
+    CW --&gt; CD
+    CW --&gt; CF
+    CW --&gt; PC
+    CW -.-&gt; SW
+    
+    CD --&gt; AM
+    SW --&gt; SM
+    SW --&gt; VM
+    SW --&gt; CM
+
+    AM -.-&gt; I_ROUTER
+    IR -.-&gt; I_ROUTER
+    UC -.-&gt; I_USD_CTRL
+    UI_INSP -.-&gt; I_USD_INSP
+    SP -.-&gt; I_POLICY
+    OMCP -.-&gt; I_MCP
+    CH -.-&gt; I_HISTORY
+    SM -.-&gt; I_SETTINGS
+    CM -.-&gt; I_CLUSTER
+    VM -.-&gt; I_VRAM
+
+    AM --&gt; IR
+    AM --&gt; UC
+    AM --&gt; OMCP
+    AM --&gt; CH
+    AM --&gt; DE
+    IR --&gt; SRP
+    IR --&gt; CM
+    UC --&gt; SP
+    UC --&gt; UI_INSP
+    OMCP --&gt; MSC&lt;/pre&gt;" style="text;html=1;strokeColor=#334155;fillColor=#1e293b;align=left;verticalAlign=top;whiteSpace=wrap;rounded=1;spacing=16;overflow=hidden;" vertex="1" parent="canvas_box">
+          <mxGeometry x="40" y="40" width="1620" height="1170" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

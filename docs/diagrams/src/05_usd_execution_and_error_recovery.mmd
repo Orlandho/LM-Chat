@@ -1,0 +1,48 @@
+flowchart TD
+    classDef startNode fill:#0f172a,stroke:#38bdf8,stroke-width:2px,color:#f8fafc;
+    classDef checkNode fill:#1e1e2e,stroke:#a855f7,stroke-width:2px,color:#f8fafc;
+    classDef actionNode fill:#1e293b,stroke:#0284c7,stroke-width:2px,color:#f8fafc;
+    classDef secureNode fill:#14532d,stroke:#22c55e,stroke-width:2px,color:#f8fafc;
+    classDef errorNode fill:#7f1d1d,stroke:#ef4444,stroke-width:2px,color:#f8fafc;
+
+    CODE_IN([Bloque de Codigo Python Extraido]):::startNode --> VALID_SIZE{Longitud <= 100,000 bytes?}:::checkNode
+
+    VALID_SIZE -- No --> REJECT_SIZE[Error de Seguridad: Tamano Excedido]:::errorNode
+    VALID_SIZE -- Si --> AST_PARSE[Analisis Sintactico: ast.parse]:::actionNode
+
+    AST_PARSE -- Error de Sintaxis --> SYNTAX_ERR[Fallo de Sintaxis en Codigo Generado]:::errorNode
+    AST_PARSE -- Arbol Valido --> AST_WALK[Inspeccion de Nodos AST: SpatialSecurityPolicy]:::secureNode
+
+    AST_WALK --> CHECK_MODULES{Importa Modulos Prohibidos: shutil, subprocess, socket, winreg?}:::checkNode
+    CHECK_MODULES -- Si --> VIOLATION[Rechazo Preventivo: Modulo Prohibido]:::errorNode
+
+    CHECK_MODULES -- No --> CHECK_BUILTINS{Llama a Builtins Peligrosos: eval, exec, os.system?}:::checkNode
+    CHECK_BUILTINS -- Si --> VIOLATION
+
+    CHECK_BUILTINS -- No --> CHECK_LOOPS{Bucle Infinito: while True sin break o range > 10,000?}:::checkNode
+    CHECK_LOOPS -- Si --> VIOLATION
+
+    CHECK_LOOPS -- No --> CHECK_PRIMS{Manipula Prims Protegidos: /OmniverseKit_Root, /Render?}:::checkNode
+    CHECK_PRIMS -- Si --> VIOLATION
+
+    CHECK_PRIMS -- No --> PREP_SANDBOX[Preparar Entorno Seguro: __builtins__ explicito, omni, pxr, inspector, controller]:::secureNode
+
+    PREP_SANDBOX --> OPEN_UNDO[omni.kit.undo.begin: Abrir Bloque Compuesto]:::actionNode
+
+    OPEN_UNDO --> EXEC_PY[exec python_code in exec_globals]:::actionNode
+
+    EXEC_PY --> EXEC_RESULT{Ejecucion Exitosa?}:::checkNode
+
+    EXEC_RESULT -- Si --> CLOSE_UNDO_OK[omni.kit.undo.end: Cerrar Bloque Undo con Exito]:::secureNode
+    CLOSE_UNDO_OK --> SUCCESS_NOTIFY([Notificacion al Usuario: Cambios Aplicados en Stage]):::startNode
+
+    EXEC_RESULT -- Excepcion (Sdf.PathError, Tf.Diagnostic) --> CLOSE_UNDO_ERR[omni.kit.undo.end: Cerrar Bloque Undo y Capturar Traceback]:::errorNode
+
+    CLOSE_UNDO_ERR --> RETRY_CHECK{"Intento &lt; 2? (Total: 3 Intentos Maximo)"}:::checkNode
+
+    RETRY_CHECK -- Si: Intento 1 o 2 --> REACT_REFLECT[Bucle ReAct: Inyectar Traceback y Prompt de Reflexion]:::actionNode
+    REACT_REFLECT --> REQUERY_LLM[Re-consultar Modelo LLM para Autocorreccion]:::actionNode
+    REQUERY_LLM --> CODE_IN
+
+    RETRY_CHECK -- No: Reintentos Agotados --> FINAL_DIAG[DiagnosticsEngine: Diagnostico Final Enriquecido y Registro]:::errorNode
+    FINAL_DIAG --> FAIL_NOTIFY([Notificar Agotamiento de Reintentos en UI]):::errorNode

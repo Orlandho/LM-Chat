@@ -1,0 +1,74 @@
+graph TD
+    classDef omniHost fill:#0f172a,stroke:#38bdf8,stroke-width:2px,color:#f8fafc;
+    classDef lmExt fill:#1e293b,stroke:#a855f7,stroke-width:2px,color:#f8fafc;
+    classDef mcpProc fill:#1c1917,stroke:#f59e0b,stroke-width:2px,color:#f8fafc;
+    classDef localLLM fill:#14532d,stroke:#22c55e,stroke-width:2px,color:#f8fafc;
+    classDef cloudLLM fill:#312e81,stroke:#818cf8,stroke-width:2px,color:#f8fafc;
+    classDef storage fill:#3b0764,stroke:#ec4899,stroke-width:2px,color:#f8fafc;
+
+    subgraph OMNIVERSE_HOST ["Proceso Host: NVIDIA Omniverse Kit SDK 105/106/107+"]
+        RENDER_THREAD["Hilo de Renderizado Principal (Sacred 60 FPS RTX)"]:::omniHost
+        STAGE[("OpenUSD Stage Activo: Prims, Xforms, Lights, Physics")]:::omniHost
+        KIT_CMD["omni.kit.commands: Undo/Redo Stack (Ctrl+Z / Ctrl+Y)"]:::omniHost
+        KIT_UNDO["omni.kit.undo (Begin/End Compound Blocks)"]:::omniHost
+        
+        subgraph LM_CHAT_EXT ["Extension LM-Chat (orlandodorival.lm_chat)"]
+            GUI["ChatWindow GUI (omni.ui)"]:::lmExt
+            CLI["LM-Chat CLI Harness (cli/lmchat_cli.py)"]:::lmExt
+            AGENT_MGR["AgentManager (Bucle ReAct 3 intentos totales)"]:::lmExt
+            ROUTER["InferenceRouter (SSE Streaming & Heuristica)"]:::lmExt
+            USD_CTRL["USDController & AST Sandbox"]:::lmExt
+            USD_INSP["USDInspector (audit, find, layer stack)"]:::lmExt
+            DIAG_ENG["DiagnosticsEngine & Structured Logger"]:::lmExt
+        end
+
+        RENDER_THREAD -.->|"Async Tasks (No Bloqueante)"| AGENT_MGR
+        USD_CTRL -->|"Ejecucion con Undo"| KIT_CMD
+        KIT_CMD -->|"Mutacion Segura"| STAGE
+        USD_CTRL -->|"Agrupamiento de Historial"| KIT_UNDO
+        USD_INSP -->|"Inspeccion Solo Lectura"| STAGE
+    end
+
+    subgraph MCP_SUBPROCESSES ["Subprocesos Locales MCP (Aislamiento stdio)"]
+        MCP_REG["OmniMCPRegistry (mcp/omni_mcp_registry.py)"]:::mcpProc
+        MCP_CONN["MCPServerConnection (Subprocess stdio / JSON-RPC 2.0)"]:::mcpProc
+        SERVER_FS["MCP Server: FileSystem / Specs"]:::mcpProc
+        SERVER_DOCS["MCP Server: Omniverse Docs / CAD"]:::mcpProc
+        
+        MCP_REG --> MCP_CONN
+        MCP_CONN -->|"stdin / stdout"| SERVER_FS
+        MCP_CONN -->|"stdin / stdout"| SERVER_DOCS
+    end
+
+    subgraph LOCAL_INFERENCE ["Servidores de Inferencia Locales (Air-Gapped)"]
+        LM_STUDIO["LM Studio Server (:1234): Integrations REST & VRAM Manager"]:::localLLM
+        OLLAMA["Ollama Server (:11434): DeepSeek-R1, Qwen 2.5 Coder"]:::localLLM
+        VLLM_CLUSTER["vLLM / Local Cluster (:8000): ClusterManager"]:::localLLM
+    end
+
+    subgraph CLOUD_INFERENCE ["Proveedores Cloud Frontier (HTTPS / TLS 1.3)"]
+        GEMINI["Google Gemini API: gemini-3.8-flash, gemini-3.7-flash"]:::cloudLLM
+        CLAUDE["Anthropic Claude API: claude-3-7-sonnet, opus-5.5"]:::cloudLLM
+        OPENAI["OpenAI API: o3-mini, gpt-4o, gpt-6"]:::cloudLLM
+        NVIDIA_NIM["NVIDIA NIM / Spark: Nemotron 70B, Cosmos 3"]:::cloudLLM
+    end
+
+    subgraph SECURE_STORAGE ["Almacenamiento Local Seguro (~/.omni_lm_chat/)"]
+        SESSIONS[("Directorio de Sesiones JSON: Permisos 0o600 / 0o700")]:::storage
+        SETTINGS_CONF["Configuracion Persistente: settings.json"]:::storage
+        LOG_FILES[("Archivos de Registro: Rotating Log Files")]:::storage
+    end
+
+    GUI --> AGENT_MGR
+    CLI --> AGENT_MGR
+    AGENT_MGR --> ROUTER
+    AGENT_MGR --> USD_CTRL
+    USD_CTRL --> USD_INSP
+    AGENT_MGR <-->|"Herramientas / Tool Calls"| MCP_REG
+
+    ROUTER <-->|"HTTP / SSE Streaming"| LOCAL_INFERENCE
+    ROUTER <-->|"HTTPS / SSE Streaming"| CLOUD_INFERENCE
+
+    AGENT_MGR <-->|"Persistencia de Sesiones"| SESSIONS
+    LM_CHAT_EXT <-->|"Lectura / Escritura"| SETTINGS_CONF
+    DIAG_ENG -->|"Persistencia de Logs"| LOG_FILES

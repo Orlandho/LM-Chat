@@ -1,0 +1,94 @@
+sequenceDiagram
+    autonumber
+    actor U as Usuario (GUI / CLI)
+    participant CW as ChatWindow / CLI
+    participant AM as AgentManager
+    participant IR as InferenceRouter
+    participant LLM as Motor LLM
+    participant UC as USDController
+    participant SP as SpatialSecurityPolicy (AST)
+    participant STAGE as OpenUSD Stage
+
+    U->>CW: Ingresa Prompt ("Crea 3 cilindros y cambia el material")
+    CW->>AM: process_prompt(prompt, callbacks...)
+    activate AM
+    AM->>AM: Registra mensaje en memoria conversacional
+    AM->>IR: stream_chat_completions(messages, tools, integrations)
+    activate IR
+    IR->>LLM: Peticion HTTP SSE Streaming (timeout=600s)
+    activate LLM
+
+    loop Streaming de Tokens
+        LLM-->>IR: Chunk SSE (delta: content / reasoning / tool_calls)
+        alt Tokens de Razonamiento (<think> o reasoning_content)
+            IR-->>CW: reasoning_callback(chunk)
+            CW->>CW: Renderiza en CollapsibleFrame
+        else Tokens de Contenido Final
+            IR-->>CW: append_callback(chunk)
+            CW->>CW: Fusiona tokens en burbuja activa
+        end
+    end
+    deactivate LLM
+    deactivate IR
+
+    AM->>AM: Limpia etiquetas <think> y busca bloque python
+
+    alt No contiene bloque de codigo Python
+        AM-->>CW: Retorna texto de respuesta
+        CW-->>U: Muestra respuesta conversacional completa
+    else Contiene bloque de codigo Python
+        alt MODO PLAN_AND_CONFIRM (Plan y Revision)
+            AM->>AM: Retiene codigo en _pending_code (NO ejecuta)
+            AM-->>CW: confirmation_callback(code, plan_details)
+            CW->>CW: Muestra PlanCard interactiva con preview
+            CW-->>U: Presenta botones [Ejecutar en Stage] y [Cancelar]
+
+            alt Usuario pulsa [Cancelar]
+                U->>CW: Click [Cancelar]
+                CW->>AM: cancel_pending_code()
+                AM->>AM: Descarta _pending_code
+                AM-->>CW: Confirmacion de cancelacion
+                CW-->>U: Notifica: "Propuesta descartada. Escena intacta."
+            else Usuario pulsa [Ejecutar en Stage]
+                U->>CW: Click [Ejecutar en Stage]
+                CW->>AM: execute_pending_code()
+                activate AM
+                AM->>UC: execute_code(pending_code)
+                activate UC
+                UC->>SP: validate_code(code)
+                alt Violacion de Politica de Seguridad (AST)
+                    SP-->>UC: (False, "Violation: module forbidden")
+                    UC-->>AM: {success: False, error_msg: "..."}
+                    AM-->>CW: Muestra error de seguridad
+                else Codigo Valido
+                    SP-->>UC: (True, None)
+                    UC->>STAGE: omni.kit.undo.begin() -> exec() -> omni.kit.undo.end()
+                    STAGE-->>UC: Mutacion completada
+                    UC-->>AM: {success: True}
+                    AM-->>CW: Notifica: "Codigo ejecutado exitosamente"
+                    CW-->>U: Actualiza vista 3D en Omniverse
+                end
+                deactivate UC
+                deactivate AM
+            end
+
+        else MODO IMMEDIATE (Fast Act / Ejecucion Directa)
+            AM->>UC: execute_code(extracted_code)
+            activate UC
+            UC->>SP: validate_code(code)
+            alt Validacion Exitosa y Ejecucion en Stage
+                SP-->>UC: (True, None)
+                UC->>STAGE: omni.kit.undo.begin() -> exec() -> omni.kit.undo.end()
+                UC-->>AM: {success: True}
+                AM-->>CW: Notifica exito
+                CW-->>U: Escena actualizada inmediatamente
+            else Error en Ejecucion (Sdf.PathError / Runtime)
+                UC-->>AM: {success: False, error_msg: "..."}
+                deactivate UC
+                Note over AM,LLM: Bucle ReAct de Autocorreccion (Hasta 3 intentos totales)
+                AM->>IR: Reconsulta con traceback de error
+                IR->>LLM: Prompt de reflexion de error...
+            end
+        end
+    end
+    deactivate AM

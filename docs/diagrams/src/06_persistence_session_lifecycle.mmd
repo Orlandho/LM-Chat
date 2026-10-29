@@ -1,0 +1,43 @@
+flowchart TD
+    classDef startNode fill:#0f172a,stroke:#38bdf8,stroke-width:2px,color:#f8fafc;
+    classDef actionNode fill:#1e293b,stroke:#0284c7,stroke-width:2px,color:#f8fafc;
+    classDef checkNode fill:#1e1e2e,stroke:#a855f7,stroke-width:2px,color:#f8fafc;
+    classDef storageNode fill:#3b0764,stroke:#ec4899,stroke-width:2px,color:#f8fafc;
+    classDef secureNode fill:#14532d,stroke:#22c55e,stroke-width:2px,color:#f8fafc;
+
+    INIT([Arranque de Extension / CLI]):::startNode --> LOAD_CONF[SettingsManager: Cargar ~/.omni_lm_chat/settings.json]:::actionNode
+
+    LOAD_CONF --> CONF_EXISTS{settings.json Existe?}:::checkNode
+    CONF_EXISTS -- No --> CREATE_DEFAULTS[Inicializar Valores Predeterminados: LM Studio :1234, Gemini 3.8, Ollama :11434]:::actionNode
+    CONF_EXISTS -- Si --> PARSE_CONF[Cargar Proveedor, Modelo, URL, Keys y MCP Servers]:::actionNode
+    CREATE_DEFAULTS --> PARSE_CONF
+
+    PARSE_CONF --> INIT_HIST[LocalChatHistoryManager: Inicializar Directorio de Sesiones]:::actionNode
+
+    INIT_HIST --> LIST_SESS[list_sessions: Escaneo de ~/.omni_lm_chat/sessions/]:::storageNode
+
+    LIST_SESS --> HAS_SESS{Existen Sesiones Previas?}:::checkNode
+
+    HAS_SESS -- Si --> RESTORE_LATEST[Recuperar Ultima Sesion Activa por updated_at]:::actionNode
+    HAS_SESS -- No --> CREATE_NEW[create_session: Generar Nueva Sesion UUIDv4 en UTC ISO 8601]:::actionNode
+
+    RESTORE_LATEST --> SYNC_AGENT[AgentManager.load_session_messages: Sincronizar Historial Reteniendo System Prompt]:::actionNode
+    CREATE_NEW --> SYNC_AGENT
+
+    SYNC_AGENT --> USER_TURN([Interaccion Usuario / Asistente]):::startNode
+
+    USER_TURN --> SAVE_REQ[save_session: Persistencia en Disco]:::actionNode
+
+    SAVE_REQ --> SANITIZE_SID[Sanitizar session_id: Prevenir Directory Traversal]:::secureNode
+
+    SANITIZE_SID --> ATOMIC_WRITE[Escritura Atomica Segura: Archivo .tmp, permisos 0o600 / 0o700, os.replace]:::secureNode
+
+    ATOMIC_WRITE --> SEARCH_OP{Operacion de Busqueda?}:::checkNode
+
+    SEARCH_OP -- Si --> SEARCH_PASS[search_sessions: Busqueda Monopasada por Titulo y Mensajes]:::actionNode
+    SEARCH_PASS --> RENDER_SEARCH[Actualizar Dropdown / Lista en UI y CLI]:::actionNode
+
+    SEARCH_OP -- No --> EXPORT_OP{Exportar / Importar?}:::checkNode
+
+    EXPORT_OP -- Exportar --> EXPORT_JSON[export_session_json: Generar Cadena JSON Estructurada]:::actionNode
+    EXPORT_OP -- Importar --> IMPORT_JSON[import_session_json: Validar Esquema, Asignar Nuevo ID y Guardar]:::actionNode

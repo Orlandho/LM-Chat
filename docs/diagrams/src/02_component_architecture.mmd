@@ -1,0 +1,78 @@
+graph TD
+    classDef iface fill:#0f172a,stroke:#38bdf8,stroke-width:2px,color:#38bdf8,stroke-dasharray: 5 5;
+    classDef uiLayer fill:#1e293b,stroke:#0284c7,stroke-width:2px,color:#f8fafc;
+    classDef logicLayer fill:#1e1e2e,stroke:#a855f7,stroke-width:2px,color:#f8fafc;
+    classDef coreLayer fill:#14532d,stroke:#22c55e,stroke-width:2px,color:#f8fafc;
+    classDef mcpLayer fill:#1c1917,stroke:#f59e0b,stroke-width:2px,color:#f8fafc;
+    classDef storeLayer fill:#3b0764,stroke:#ec4899,stroke-width:2px,color:#f8fafc;
+
+    subgraph UI_LAYER ["Capa de Presentacion (ui/)"]
+        CW["ChatWindow (omni.ui.Window)"]:::uiLayer
+        CD["ChatDelegate (Model-Delegate-View)"]:::uiLayer
+        SW["SettingsWindow (Modal Settings)"]:::uiLayer
+        CF["CollapsibleFrame (omni.ui)"]:::uiLayer
+        PC["PlanCard (UI Widget con [Ejecutar] y [Cancelar])"]:::uiLayer
+    end
+
+    subgraph INTERFACES ["Contratos Tipados (core/interfaces.py)"]
+        I_ROUTER["IInferenceRouter"]:::iface
+        I_USD_CTRL["IUSDController"]:::iface
+        I_USD_INSP["IUSDInspector"]:::iface
+        I_POLICY["IAgentPolicy"]:::iface
+        I_MCP["IMCPClientRegistry"]:::iface
+        I_HISTORY["IChatHistoryManager"]:::iface
+        I_SETTINGS["ISettingsManager"]:::iface
+        I_CLUSTER["IClusterManager"]:::iface
+        I_VRAM["ILMStudioVRAMManager"]:::iface
+    end
+
+    subgraph LOGIC_LAYER ["Capa de Negocio y Cognicion (logic/)"]
+        AM["AgentManager (Bucle ReAct 3 intentos totales)"]:::logicLayer
+        IR["InferenceRouter (Multi-Provider Gateway)"]:::logicLayer
+        SRP["StreamingReasoningParser (<think> Tag Parser)"]:::logicLayer
+        UC["USDController (Sandbox con __builtins__ y Undo)"]:::logicLayer
+        UI_INSP["USDInspector (Auditoria de Assets y Layer Stack)"]:::logicLayer
+        SP["SpatialSecurityPolicy (core/policies.py AST)"]:::logicLayer
+        CH["LocalChatHistoryManager (Persistencia Atomica JSON)"]:::logicLayer
+        SM["SettingsManager (~/.omni_lm_chat/settings.json)"]:::logicLayer
+        CM["ClusterManager (Failover y Balanceo)"]:::logicLayer
+        VM["LMStudioVRAMManager (Descarga VRAM)"]:::logicLayer
+        DE["DiagnosticsEngine & Logger"]:::logicLayer
+    end
+
+    subgraph MCP_LAYER ["Subsistema de Herramientas MCP (mcp/)"]
+        OMCP["OmniMCPRegistry (Registro Dinamico)"]:::mcpLayer
+        MSC["MCPServerConnection (Subprocess stdio)"]:::mcpLayer
+    end
+
+    CW --> CD
+    CW --> CF
+    CW --> PC
+    CW -.-> SW
+    
+    CD --> AM
+    SW --> SM
+    SW --> VM
+    SW --> CM
+
+    AM -.-> I_ROUTER
+    IR -.-> I_ROUTER
+    UC -.-> I_USD_CTRL
+    UI_INSP -.-> I_USD_INSP
+    SP -.-> I_POLICY
+    OMCP -.-> I_MCP
+    CH -.-> I_HISTORY
+    SM -.-> I_SETTINGS
+    CM -.-> I_CLUSTER
+    VM -.-> I_VRAM
+
+    AM --> IR
+    AM --> UC
+    AM --> OMCP
+    AM --> CH
+    AM --> DE
+    IR --> SRP
+    IR --> CM
+    UC --> SP
+    UC --> UI_INSP
+    OMCP --> MSC

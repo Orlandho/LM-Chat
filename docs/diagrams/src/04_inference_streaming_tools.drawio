@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="app.diagrams.net" modified="2026-10-28T23:30:00.000Z" agent="Antigravity-DocEngine" version="24.7.17" type="device">
+  <diagram id="04_inference_streaming_tools" name="LM-Chat: Ciclo de Inferencia, Streaming SSE, Razonamiento y Herramientas MCP">
+    <mxGraphModel dx="1600" dy="1200" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1800" pageHeight="1400" background="#0b0f19" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        
+        <!-- TITULO PRINCIPAL -->
+        <mxCell id="title_node" value="&lt;b&gt;LM-Chat™ &amp;mdash; LM-Chat: Ciclo de Inferencia, Streaming SSE, Razonamiento y Herramientas MCP&lt;/b&gt;&lt;br/&gt;&lt;font color='#94a3b8'&gt;NVIDIA Omniverse Kit Extension (orlandodorival.lm_chat) &amp;bull; Version 1.2.0&lt;/font&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=18;fontColor=#38bdf8;" vertex="1" parent="1">
+          <mxGeometry x="50" y="20" width="1700" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- CONTENEDOR PRINCIPAL DEL DIAGRAMA -->
+        <mxCell id="canvas_box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#0f172a;strokeColor=#1e293b;strokeWidth=2;arcSize=6;" vertex="1" parent="1">
+          <mxGeometry x="50" y="90" width="1700" height="1250" as="geometry" />
+        </mxCell>
+
+        <!-- FUENTE MERMAID / ESPECIFICACION ESTRUCTURADA -->
+        <mxCell id="spec_node" value="&lt;h3 style='color:#38bdf8; margin:0 0 8px 0;'&gt;Especificacion de Arquitectura / Flujo Estructurado&lt;/h3&gt;&lt;pre style='color:#e2e8f0; font-family:Consolas, monospace; font-size:11px; white-space:pre-wrap;'&gt;flowchart TD
+    classDef startNode fill:#0f172a,stroke:#38bdf8,stroke-width:2px,color:#f8fafc;
+    classDef checkNode fill:#1e1e2e,stroke:#a855f7,stroke-width:2px,color:#f8fafc;
+    classDef actionNode fill:#1e293b,stroke:#0284c7,stroke-width:2px,color:#f8fafc;
+    classDef mcpNode fill:#1c1917,stroke:#f59e0b,stroke-width:2px,color:#f8fafc;
+    classDef errorNode fill:#7f1d1d,stroke:#ef4444,stroke-width:2px,color:#f8fafc;
+
+    START([Inicio: Mensaje de Usuario en Cola]):::startNode --&gt; DETECT[InferenceRouter: Analisis de Modelo Activo]:::actionNode
+    
+    DETECT --&gt; REASON_CHECK{is_reasoning_model: Regex Check}:::checkNode
+    
+    REASON_CHECK -- Si: o1, o3, DeepSeek-R1, Claude Thinking --&gt; ADAPT_REASON[Adaptar Payload: Omitir temperature y fijar max_completion_tokens]:::actionNode
+    REASON_CHECK -- No: Modelo Estandar --&gt; ADAPT_STD[Configurar temperature y max_tokens]:::actionNode
+
+    ADAPT_REASON --&gt; TOOL_CHECK{Existen Herramientas MCP Registradas?}:::checkNode
+    ADAPT_STD --&gt; TOOL_CHECK
+
+    TOOL_CHECK -- Si --&gt; FORMAT_TOOLS[Construir Payload tools e Integrations para LM Studio]:::mcpNode
+    TOOL_CHECK -- No --&gt; DISPATCH_HTTP[Despachar Peticion HTTP SSE Streaming]:::actionNode
+
+    FORMAT_TOOLS --&gt; DISPATCH_HTTP
+
+    DISPATCH_HTTP --&gt; SSE_STREAM{Recibiendo Chunks SSE?}:::checkNode
+
+    SSE_STREAM -- Chunk Exitoso --&gt; PARSE_CHUNK[StreamingReasoningParser / Delta Parser]:::actionNode
+
+    PARSE_CHUNK --&gt; CHUNK_TYPE{Tipo de Chunk?}:::checkNode
+
+    CHUNK_TYPE -- Reasoning / think --&gt; STREAM_THINK[reasoning_callback: Canalizar a CollapsibleFrame en UI]:::actionNode
+    CHUNK_TYPE -- Contenido Markdown --&gt; STREAM_CONTENT[append_callback: Fusionar tokens en burbuja activa]:::actionNode
+    CHUNK_TYPE -- Tool Call Delta --&gt; ACCUM_TOOL[Acumular fragmentos de funcion y argumentos JSON]:::mcpNode
+
+    STREAM_THINK --&gt; SSE_STREAM
+    STREAM_CONTENT --&gt; SSE_STREAM
+    ACCUM_TOOL --&gt; SSE_STREAM
+
+    SSE_STREAM -- Fin de Stream --&gt; EVAL_TOOLS{Se acumularon tool_calls?}:::checkNode
+
+    EVAL_TOOLS -- Si --&gt; CALL_MCP[OmniMCPRegistry.call_tool: Despacho JSON-RPC 2.0 a Subproceso]:::mcpNode
+    CALL_MCP --&gt; INJECT_TOOL_RES[Inyectar mensaje role: tool con resultado JSON]:::mcpNode
+    INJECT_TOOL_RES --&gt; DISPATCH_HTTP
+
+    EVAL_TOOLS -- No --&gt; EXTRACT_CODE[AgentManager: Extraer Python Code ignorando think]:::actionNode
+
+    SSE_STREAM -- Error HTTP / Timeout --&gt; DIAGNOSE[DiagnosticsEngine: diagnose_inference_failure]:::errorNode
+    DIAGNOSE --&gt; RENDER_DIAG_CARD[Renderizar Tarjeta Markdown de Diagnostico con Solucion]:::errorNode&lt;/pre&gt;" style="text;html=1;strokeColor=#334155;fillColor=#1e293b;align=left;verticalAlign=top;whiteSpace=wrap;rounded=1;spacing=16;overflow=hidden;" vertex="1" parent="canvas_box">
+          <mxGeometry x="40" y="40" width="1620" height="1170" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

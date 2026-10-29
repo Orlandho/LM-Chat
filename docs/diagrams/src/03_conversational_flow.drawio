@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="app.diagrams.net" modified="2026-10-28T23:30:00.000Z" agent="Antigravity-DocEngine" version="24.7.17" type="device">
+  <diagram id="03_conversational_flow" name="LM-Chat: Flujo Conversacional GUI/CLI y Bifurcacion de Modos">
+    <mxGraphModel dx="1600" dy="1200" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1800" pageHeight="1400" background="#0b0f19" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        
+        <!-- TITULO PRINCIPAL -->
+        <mxCell id="title_node" value="&lt;b&gt;LM-Chat™ &amp;mdash; LM-Chat: Flujo Conversacional GUI/CLI y Bifurcacion de Modos&lt;/b&gt;&lt;br/&gt;&lt;font color='#94a3b8'&gt;NVIDIA Omniverse Kit Extension (orlandodorival.lm_chat) &amp;bull; Version 1.2.0&lt;/font&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=18;fontColor=#38bdf8;" vertex="1" parent="1">
+          <mxGeometry x="50" y="20" width="1700" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- CONTENEDOR PRINCIPAL DEL DIAGRAMA -->
+        <mxCell id="canvas_box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#0f172a;strokeColor=#1e293b;strokeWidth=2;arcSize=6;" vertex="1" parent="1">
+          <mxGeometry x="50" y="90" width="1700" height="1250" as="geometry" />
+        </mxCell>
+
+        <!-- FUENTE MERMAID / ESPECIFICACION ESTRUCTURADA -->
+        <mxCell id="spec_node" value="&lt;h3 style='color:#38bdf8; margin:0 0 8px 0;'&gt;Especificacion de Arquitectura / Flujo Estructurado&lt;/h3&gt;&lt;pre style='color:#e2e8f0; font-family:Consolas, monospace; font-size:11px; white-space:pre-wrap;'&gt;sequenceDiagram
+    autonumber
+    actor U as Usuario (GUI / CLI)
+    participant CW as ChatWindow / CLI
+    participant AM as AgentManager
+    participant IR as InferenceRouter
+    participant LLM as Motor LLM
+    participant UC as USDController
+    participant SP as SpatialSecurityPolicy (AST)
+    participant STAGE as OpenUSD Stage
+
+    U-&gt;&gt;CW: Ingresa Prompt (&quot;Crea 3 cilindros y cambia el material&quot;)
+    CW-&gt;&gt;AM: process_prompt(prompt, callbacks...)
+    activate AM
+    AM-&gt;&gt;AM: Registra mensaje en memoria conversacional
+    AM-&gt;&gt;IR: stream_chat_completions(messages, tools, integrations)
+    activate IR
+    IR-&gt;&gt;LLM: Peticion HTTP SSE Streaming (timeout=600s)
+    activate LLM
+
+    loop Streaming de Tokens
+        LLM--&gt;&gt;IR: Chunk SSE (delta: content / reasoning / tool_calls)
+        alt Tokens de Razonamiento (&lt;think&gt; o reasoning_content)
+            IR--&gt;&gt;CW: reasoning_callback(chunk)
+            CW-&gt;&gt;CW: Renderiza en CollapsibleFrame
+        else Tokens de Contenido Final
+            IR--&gt;&gt;CW: append_callback(chunk)
+            CW-&gt;&gt;CW: Fusiona tokens en burbuja activa
+        end
+    end
+    deactivate LLM
+    deactivate IR
+
+    AM-&gt;&gt;AM: Limpia etiquetas &lt;think&gt; y busca bloque python
+
+    alt No contiene bloque de codigo Python
+        AM--&gt;&gt;CW: Retorna texto de respuesta
+        CW--&gt;&gt;U: Muestra respuesta conversacional completa
+    else Contiene bloque de codigo Python
+        alt MODO PLAN_AND_CONFIRM (Plan y Revision)
+            AM-&gt;&gt;AM: Retiene codigo en _pending_code (NO ejecuta)
+            AM--&gt;&gt;CW: confirmation_callback(code, plan_details)
+            CW-&gt;&gt;CW: Muestra PlanCard interactiva con preview
+            CW--&gt;&gt;U: Presenta botones [Ejecutar en Stage] y [Cancelar]
+
+            alt Usuario pulsa [Cancelar]
+                U-&gt;&gt;CW: Click [Cancelar]
+                CW-&gt;&gt;AM: cancel_pending_code()
+                AM-&gt;&gt;AM: Descarta _pending_code
+                AM--&gt;&gt;CW: Confirmacion de cancelacion
+                CW--&gt;&gt;U: Notifica: &quot;Propuesta descartada. Escena intacta.&quot;
+            else Usuario pulsa [Ejecutar en Stage]
+                U-&gt;&gt;CW: Click [Ejecutar en Stage]
+                CW-&gt;&gt;AM: execute_pending_code()
+                activate AM
+                AM-&gt;&gt;UC: execute_code(pending_code)
+                activate UC
+                UC-&gt;&gt;SP: validate_code(code)
+                alt Violacion de Politica de Seguridad (AST)
+                    SP--&gt;&gt;UC: (False, &quot;Violation: module forbidden&quot;)
+                    UC--&gt;&gt;AM: {success: False, error_msg: &quot;...&quot;}
+                    AM--&gt;&gt;CW: Muestra error de seguridad
+                else Codigo Valido
+                    SP--&gt;&gt;UC: (True, None)
+                    UC-&gt;&gt;STAGE: omni.kit.undo.begin() -&gt; exec() -&gt; omni.kit.undo.end()
+                    STAGE--&gt;&gt;UC: Mutacion completada
+                    UC--&gt;&gt;AM: {success: True}
+                    AM--&gt;&gt;CW: Notifica: &quot;Codigo ejecutado exitosamente&quot;
+                    CW--&gt;&gt;U: Actualiza vista 3D en Omniverse
+                end
+                deactivate UC
+                deactivate AM
+            end
+
+        else MODO IMMEDIATE (Fast Act / Ejecucion Directa)
+            AM-&gt;&gt;UC: execute_code(extracted_code)
+            activate UC
+            UC-&gt;&gt;SP: validate_code(code)
+            alt Validacion Exitosa y Ejecucion en Stage
+                SP--&gt;&gt;UC: (True, None)
+                UC-&gt;&gt;STAGE: omni.kit.undo.begin() -&gt; exec() -&gt; omni.kit.undo.end()
+                UC--&gt;&gt;AM: {success: True}
+                AM--&gt;&gt;CW: Notifica exito
+                CW--&gt;&gt;U: Escena actualizada inmediatamente
+            else Error en Ejecucion (Sdf.PathError / Runtime)
+                UC--&gt;&gt;AM: {success: False, error_msg: &quot;...&quot;}
+                deactivate UC
+                Note over AM,LLM: Bucle ReAct de Autocorreccion (Hasta 3 intentos totales)
+                AM-&gt;&gt;IR: Reconsulta con traceback de error
+                IR-&gt;&gt;LLM: Prompt de reflexion de error...
+            end
+        end
+    end
+    deactivate AM&lt;/pre&gt;" style="text;html=1;strokeColor=#334155;fillColor=#1e293b;align=left;verticalAlign=top;whiteSpace=wrap;rounded=1;spacing=16;overflow=hidden;" vertex="1" parent="canvas_box">
+          <mxGeometry x="40" y="40" width="1620" height="1170" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
