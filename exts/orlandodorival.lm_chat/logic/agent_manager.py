@@ -24,8 +24,9 @@ from .usd_controller import USDController
 from logic.logger import get_logger
 from logic.diagnostics import diagnose_inference_failure, ErrorDiagnostic
 
-# Pre-compiled regular expression pattern for Python code block extraction
+# Pre-compiled regular expression patterns for code extraction and thinking tag stripping
 _PYTHON_CODE_PATTERN = re.compile(r"```python\s*(.*?)\s*```", re.DOTALL)
+_THINK_TAG_PATTERN = re.compile(r"<think>.*?</think>", re.DOTALL)
 logger = get_logger("AgentManager")
 
 
@@ -424,7 +425,7 @@ class AgentManager:
 
                 # Check for python code to execute using pre-compiled regex
                 # Strip reasoning thinking tags (<think>...</think>) from DeepSeek-R1 to avoid executing draft code
-                cleaned_content = re.sub(r"<think>.*?</think>", "", full_content, flags=re.DOTALL)
+                cleaned_content = _THINK_TAG_PATTERN.sub("", full_content)
                 matches = _PYTHON_CODE_PATTERN.findall(cleaned_content)
 
                 if matches:
