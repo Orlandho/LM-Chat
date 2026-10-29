@@ -401,11 +401,11 @@ class SettingsManager(ISettingsManager):
         return self._settings_data
 
     def save(self) -> bool:
-        """Persiste la configuración atómicamente a disco."""
+        """Persiste la configuración atómicamente a disco con permisos de archivo restringidos (0o600)."""
         try:
             config_dir = os.path.dirname(self._config_path)
             if config_dir and not os.path.exists(config_dir):
-                os.makedirs(config_dir, exist_ok=True)
+                os.makedirs(config_dir, mode=0o700, exist_ok=True)
 
             temp_path = f"{self._config_path}.tmp"
             data_to_save = dict(self._settings_data)
@@ -413,13 +413,29 @@ class SettingsManager(ISettingsManager):
                 data_to_save["mcp_servers"] = [
                     s.to_dict() if hasattr(s, "to_dict") else s for s in data_to_save["mcp_servers"]
                 ]
-            with open(temp_path, "w", encoding="utf-8") as f:
-                json.dump(data_to_save, f, indent=2, ensure_ascii=False)
+
+            flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+            if hasattr(os, "O_BINARY"):
+                flags |= os.O_BINARY
+
+            try:
+                fd = os.open(temp_path, flags, 0o600)
+                with open(fd, "w", encoding="utf-8") as f:
+                    json.dump(data_to_save, f, indent=2, ensure_ascii=False)
+            except Exception:
+                with open(temp_path, "w", encoding="utf-8") as f:
+                    json.dump(data_to_save, f, indent=2, ensure_ascii=False)
 
             if os.path.exists(self._config_path):
                 os.replace(temp_path, self._config_path)
             else:
                 os.rename(temp_path, self._config_path)
+
+            try:
+                os.chmod(self._config_path, 0o600)
+            except Exception:
+                pass
+
             logger.debug(f"Configuración persistida atómicamente en {self._config_path}")
             return True
         except Exception as e:
