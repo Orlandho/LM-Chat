@@ -211,6 +211,14 @@ class TestSettingsManager(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(models, list)
         self.assertTrue(len(models) > 0)
 
+    def test_save_file_permissions(self):
+        """Verifica que el archivo de configuración se guarde con permisos 0o600."""
+        self.manager.save()
+        self.assertTrue(os.path.exists(self.config_file))
+        if os.name != "nt":
+            mode = os.stat(self.config_file).st_mode & 0o777
+            self.assertEqual(mode, 0o600)
+
 
 if __name__ == "__main__":
     unittest.main()
