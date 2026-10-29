@@ -9,8 +9,8 @@ Diseñados para permitir el desarrollo concurrente y desacoplado por el Enjambre
 import uuid
 from datetime import datetime, timezone
 from abc import ABC, abstractmethod
-from typing import Dict, Any, List, Optional, AsyncIterator, Callable
-from dataclasses import dataclass
+from typing import Dict, Any, List, Optional, AsyncIterator, Callable, Tuple, Union
+from dataclasses import dataclass, field
 
 @dataclass
 class ChatMessage:
@@ -197,16 +197,69 @@ class IUSDInspector(ABC):
         pass
 
 class IAgentPolicy(ABC):
-    """Contrato para directivas de seguridad y gobernanza de agentes espaciales."""
+    """Contrato para directivas de seguridad, saneamiento AST y gobernanza espacial."""
+
     @abstractmethod
-    def validate_code(self, python_code: str) -> tuple[bool, Optional[str]]:
-        """Valida que el código generado no viole las políticas de seguridad espacial antes de ejecutar."""
+    def validate_code(self, python_code: str) -> Tuple[bool, Optional[str]]:
+        """Valida mediante AST que el código no viole las políticas de seguridad espacial antes de ejecutar."""
         pass
+
+    def get_safe_builtins(self) -> Dict[str, Any]:
+        """Retorna el diccionario restringido de builtins seguros para el entorno de ejecución."""
+        return {}
 
     @abstractmethod
     def is_prim_protected(self, prim_path: str) -> bool:
         """Determina si una ruta en el Stage corresponde a un elemento protegido del sistema."""
         pass
+
+
+class IUSDController(ABC):
+    """Contrato formal para ejecución segura, no-destructiva y reversible en OpenUSD (F01)."""
+
+    @abstractmethod
+    def execute_code(self, python_code: str) -> Dict[str, Any]:
+        """Ejecuta código Python de forma segura, agrupando mutaciones en un bloque reversible (begin_group/end_group).
+        Si ocurre un error durante la ejecución, revierte atómicamente las mutaciones parciales."""
+        pass
+
+    @abstractmethod
+    def create_prim(
+        self,
+        prim_type: str,
+        prim_path: Optional[str] = None,
+        attributes: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Crea un prim de forma no-destructiva mediante CreatePrimCommand / CreatePrimWithDefaultXform."""
+        pass
+
+    @abstractmethod
+    def transform_prim(
+        self,
+        prim_path: str,
+        new_transform_matrix: Optional[Any] = None,
+        translation: Optional[List[float]] = None,
+        rotation: Optional[List[float]] = None,
+        scale: Optional[List[float]] = None,
+    ) -> Dict[str, Any]:
+        """Transforma interactivamente un prim existente usando TransformPrimCommand."""
+        pass
+
+    @abstractmethod
+    def bind_material(self, prim_path: str, material_path: str) -> Dict[str, Any]:
+        """Enlaza un material UsdShade/MDL usando BindMaterialCommand."""
+        pass
+
+    @abstractmethod
+    def group_prims(self, prim_paths: List[str], parent_path: str) -> Dict[str, Any]:
+        """Reorganiza una lista de prims bajo un nuevo nodo padre usando GroupPrimsCommand."""
+        pass
+
+    @abstractmethod
+    def set_prim_attribute(self, prim_path: str, attr_name: str, value: Any) -> Dict[str, Any]:
+        """Modifica un atributo de un prim usando ChangePropertyCommand."""
+        pass
+
 
 class IMCPClientRegistry(ABC):
     """Contrato para el cliente y registro de herramientas MCP (Jules Issue #37)."""
@@ -225,11 +278,117 @@ class IMCPClientRegistry(ABC):
         """Invoca una herramienta MCP y retorna el resultado estructurado."""
         pass
 
+
+class ExecutionCancelledError(Exception):
+    """Excepción lanzada cuando una ejecución es cancelada cooperativamente."""
+    pass
+
+
+class ExecutionBudgetExceededError(Exception):
+    """Excepción lanzada cuando la ejecución excede el presupuesto temporal o de pasos."""
+    pass
+
+
+@dataclass
+class CancellationToken:
+    """Token cooperativo de cancelación para ejecución acotada de scripts."""
+    _cancelled: bool = False
+    _callbacks: List[Callable[[], None]] = field(default_factory=list)
+
+    @property
+    def is_cancellation_requested(self) -> bool:
+        """Indica si se ha solicitado la cancelación de la ejecución."""
+        return self._cancelled
+
+    def cancel(self) -> None:
+        """Solicita la cancelación e invoca callbacks registrados de forma segura."""
+        if not self._cancelled:
+            self._cancelled = True
+            for cb in self._callbacks:
+                try:
+                    cb()
+                except Exception:
+                    pass
+
+    def register_callback(self, callback: Callable[[], None]) -> None:
+        """Registra un callback a ejecutar cuando se solicite la cancelación."""
+        if self._cancelled:
+            try:
+                callback()
+            except Exception:
+                pass
+        else:
+            self._callbacks.append(callback)
+
+    def throw_if_cancellation_requested(self) -> None:
+        """Lanza ExecutionCancelledError si se ha solicitado la cancelación."""
+        if self._cancelled:
+            raise ExecutionCancelledError("La ejecución fue cancelada por el usuario.")
+
+
+@dataclass
+class ExecutionBudget:
+    """Presupuesto formal de tiempo y pasos para ejecución segura en Omniverse."""
+    max_wall_time_seconds: float = 5.0
+    max_loop_iterations: int = 10_000
+    max_prims_creation_limit: int = 500
+    slice_yield_interval_seconds: float = 0.016  # ~1 frame a 60 FPS
+
+
+@dataclass
+class ExecutionResult:
+    """Resultado estructurado de la ejecución de código en OpenUSD."""
+    success: bool
+    error_msg: Optional[str] = None
+    error_type: Optional[str] = None
+    line_number: Optional[int] = None
+    traceback_str: Optional[str] = None
+    cancelled: bool = False
+    execution_time_ms: float = 0.0
+    partial_changes_rolled_back: bool = False
+    metadata: Optional[Dict[str, Any]] = None
+
+    def __getitem__(self, key: str) -> Any:
+        return getattr(self, key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return getattr(self, key, default)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serializa el resultado a un diccionario estándar."""
+        return {
+            "success": self.success,
+            "error_msg": self.error_msg,
+            "error_type": self.error_type,
+            "line_number": self.line_number,
+            "traceback_str": self.traceback_str,
+            "cancelled": self.cancelled,
+            "execution_time_ms": self.execution_time_ms,
+            "partial_changes_rolled_back": self.partial_changes_rolled_back,
+            "metadata": self.metadata or {},
+        }
+
+
 class IExecutionEngine(ABC):
-    """Contrato para el motor de ejecución y autorreflexión ReAct (Jules Issue #38)."""
+    """Contrato formal para el motor de ejecución acotada, cancelable y reversible."""
+
     @abstractmethod
-    def execute_script(self, python_code: str, dry_run: bool = False) -> Dict[str, Any]:
-        """Ejecuta código Python usando omni.kit.commands para Undo/Redo y captura excepciones."""
+    def execute_script(
+        self,
+        python_code: str,
+        dry_run: bool = False,
+    ) -> ExecutionResult:
+        """Ejecuta código síncronamente (modo de compatibilidad)."""
+        pass
+
+    @abstractmethod
+    async def execute_script_async(
+        self,
+        python_code: str,
+        budget: Optional[ExecutionBudget] = None,
+        cancellation_token: Optional[CancellationToken] = None,
+    ) -> ExecutionResult:
+        """Ejecuta código de forma acotada, cancelable y sin bloquear el hilo de Kit."""
         pass
 
     @abstractmethod
