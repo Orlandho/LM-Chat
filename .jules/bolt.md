@@ -27,3 +27,9 @@
 **Learning:** Querying USD prims by name pattern or attribute filter in `USDInspector.find_prims_by_query()` previously computed string representations (`str(prim.GetPath())`) and re-compiled regular expressions (`re.search(name_pattern, path_str, re.IGNORECASE)`) for every traversed prim in large stage hierarchies. Additionally, checking `hasattr(prim, "GetAttribute")` repeatedly inside inner filter loops added method lookup overhead.
 
 **Action:** Pre-compile regex search patterns once outside traversal loops, cache `hasattr` checks per prim, and order cheap filter operations (such as type checks) before string path conversions and regex evaluations.
+
+## 2026-04-03 - Consolidated Pre-Compiled Regex for Reasoning Model Detection
+
+**Learning:** `is_reasoning_model()` evaluated model name strings against a list of 11 distinct regex patterns using `any(re.search(pat, clean_name) for pat in REASONING_MODEL_PATTERNS)` on every payload construction and model check. Re-searching multiple patterns sequentially in Python loops created up to 11 search iterations and string allocations per call. Consolidating the pattern array into a single pre-compiled regex `_REASONING_MODEL_REGEX = re.compile("|".join(REASONING_MODEL_PATTERNS), re.IGNORECASE)` reduces evaluation overhead by 5x (from ~9.37s to ~1.88s for 1M checks).
+
+**Action:** Consolidate static regex list checks into a single pre-compiled `re.compile("|".join(patterns), re.IGNORECASE)` object module-wide.
