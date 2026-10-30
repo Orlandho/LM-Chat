@@ -125,6 +125,23 @@ class TestSettingsManager(unittest.IsolatedAsyncioTestCase):
         cfg = self.manager.get_provider_config("OpenAI API")
         self.assertEqual(cfg["base_url"], "https://api.openai.com/v1")
 
+    def test_secure_file_and_directory_permissions(self):
+        """Verifica que el archivo y directorio de configuración tengan permisos restringidos (0o600 / 0o700)."""
+        sub_dir = os.path.join(self.temp_dir.name, "secure_config")
+        config_path = os.path.join(sub_dir, "settings.json")
+        mgr = SettingsManager(config_path=config_path)
+        mgr.update_provider_config("OpenAI API", api_key="sk-secret-key")
+
+        self.assertTrue(os.path.exists(config_path))
+        if os.name == "posix":
+            file_stat = os.stat(config_path)
+            file_mode = file_stat.st_mode & 0o777
+            self.assertEqual(file_mode, 0o600)
+
+            dir_stat = os.stat(sub_dir)
+            dir_mode = dir_stat.st_mode & 0o777
+            self.assertEqual(dir_mode, 0o700)
+
     @patch("aiohttp.ClientSession.get")
     async def test_test_connection_success(self, mock_get):
         """Verifica resultado exitoso de la prueba de conexión (HTTP 200)."""
