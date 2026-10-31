@@ -211,6 +211,23 @@ class TestSettingsManager(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(models, list)
         self.assertTrue(len(models) > 0)
 
+    def test_settings_file_and_dir_permissions(self):
+        """Verifica que SettingsManager.save() aplique permisos restrictivos (0o700 / 0o600)."""
+        import stat
+        nested_dir = os.path.join(self.temp_dir.name, "secure_dir")
+        secure_cfg_path = os.path.join(nested_dir, "settings.json")
+
+        mgr = SettingsManager(config_path=secure_cfg_path)
+        mgr.update_provider_config("OpenAI API", api_key="sk-sensitive-api-key")
+
+        self.assertTrue(os.path.exists(secure_cfg_path))
+        if os.name == "posix":
+            # En sistemas POSIX, validar bits de permisos restrictivos
+            file_mode = stat.S_IMODE(os.stat(secure_cfg_path).st_mode)
+            dir_mode = stat.S_IMODE(os.stat(nested_dir).st_mode)
+            self.assertEqual(file_mode, 0o600)
+            self.assertEqual(dir_mode, 0o700)
+
 
 if __name__ == "__main__":
     unittest.main()
