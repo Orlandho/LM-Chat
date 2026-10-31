@@ -27,3 +27,9 @@
 **Learning:** Querying USD prims by name pattern or attribute filter in `USDInspector.find_prims_by_query()` previously computed string representations (`str(prim.GetPath())`) and re-compiled regular expressions (`re.search(name_pattern, path_str, re.IGNORECASE)`) for every traversed prim in large stage hierarchies. Additionally, checking `hasattr(prim, "GetAttribute")` repeatedly inside inner filter loops added method lookup overhead.
 
 **Action:** Pre-compile regex search patterns once outside traversal loops, cache `hasattr` checks per prim, and order cheap filter operations (such as type checks) before string path conversions and regex evaluations.
+
+## 2026-04-03 - Consolidated Pre-Compiled Regex & LRU Caching for High-Frequency Heuristic Dispatch
+
+**Learning:** `is_reasoning_model()` in `InferenceRouter` was called on every chat payload construction and streaming cycle, evaluating model names against 11 separate regex string patterns with `any(re.search(pat, name) ...)`. Iterating uncompiled patterns in Python loops introduced redundant regex parsing and string allocations. Consolidating the pattern list into a single pre-compiled regular expression (`_REASONING_MODEL_REGEX = re.compile("|".join(...), re.IGNORECASE)`) yielded a ~2.8x speedup on cold evaluations, while pairing it with `@functools.lru_cache(maxsize=256)` reduced repeated lookups to $O(1)$ hash table hits (~44x speedup, 2.21s -> 0.05s per 50k calls).
+
+**Action:** Consolidate multi-pattern string regex lists into a single pre-compiled `re.compile()` expression, and apply `@functools.lru_cache` on pure classification helpers called repeatedly across request lifecycles.
