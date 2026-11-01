@@ -27,3 +27,9 @@
 **Learning:** Querying USD prims by name pattern or attribute filter in `USDInspector.find_prims_by_query()` previously computed string representations (`str(prim.GetPath())`) and re-compiled regular expressions (`re.search(name_pattern, path_str, re.IGNORECASE)`) for every traversed prim in large stage hierarchies. Additionally, checking `hasattr(prim, "GetAttribute")` repeatedly inside inner filter loops added method lookup overhead.
 
 **Action:** Pre-compile regex search patterns once outside traversal loops, cache `hasattr` checks per prim, and order cheap filter operations (such as type checks) before string path conversions and regex evaluations.
+
+## 2026-04-03 - Unified Regex Pre-Compilation & LRU Caching for Model Classification
+
+**Learning:** Evaluating whether an LLM supports extended reasoning (`is_reasoning_model`) on every chat turn and request payload construction previously iterated through a list of 11 separate regex patterns, dynamically calling `re.search()` on each. Compiling a single unified regex pattern (`re.compile("|".join(...))`) yielded a ~6.3x speedup, and combining it with `@lru_cache(maxsize=128)` produced a ~62x speedup (~0.95 µs vs ~59 µs) for recurring model lookups.
+
+**Action:** Compile lists of pattern alternatives into a single unified regular expression at module scope, and decorate pure string classification helpers with `@lru_cache`.
