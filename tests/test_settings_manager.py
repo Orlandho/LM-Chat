@@ -55,10 +55,23 @@ class TestSettingsManager(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.manager.get_default_provider(), "Claude API")
         self.assertEqual(self.manager.get_default_model("Claude API"), "claude-opus-5-5-latest")
 
-
         # Recargar desde el archivo físico
         reloaded = SettingsManager(config_path=self.config_file)
         self.assertEqual(reloaded.get_default_provider(), "Claude API")
+
+    def test_secure_settings_file_permissions(self):
+        """Verifica que settings.json y su directorio se persistan con permisos restringidos."""
+        nested_dir = os.path.join(self.temp_dir.name, "secure_config_dir")
+        nested_config = os.path.join(nested_dir, "settings.json")
+        mgr = SettingsManager(config_path=nested_config)
+        mgr.update_provider_config("OpenAI API", api_key="sk-super-secret-key")
+
+        self.assertTrue(os.path.exists(nested_config))
+        if os.name == "posix":
+            file_mode = os.stat(nested_config).st_mode & 0o777
+            dir_mode = os.stat(nested_dir).st_mode & 0o777
+            self.assertEqual(file_mode, 0o600, f"Expected 0o600 for settings file, got {oct(file_mode)}")
+            self.assertEqual(dir_mode, 0o700, f"Expected 0o700 for settings dir, got {oct(dir_mode)}")
 
     def test_update_provider_config(self):
         """Verifica la actualización de URL, modelo y credenciales para un proveedor."""
