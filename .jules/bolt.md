@@ -27,3 +27,9 @@
 **Learning:** Querying USD prims by name pattern or attribute filter in `USDInspector.find_prims_by_query()` previously computed string representations (`str(prim.GetPath())`) and re-compiled regular expressions (`re.search(name_pattern, path_str, re.IGNORECASE)`) for every traversed prim in large stage hierarchies. Additionally, checking `hasattr(prim, "GetAttribute")` repeatedly inside inner filter loops added method lookup overhead.
 
 **Action:** Pre-compile regex search patterns once outside traversal loops, cache `hasattr` checks per prim, and order cheap filter operations (such as type checks) before string path conversions and regex evaluations.
+
+## 2026-04-03 - USD Stage Asset Auditing Path Caching & Root Layer Hoisting
+
+**Learning:** In `USDInspector.audit_missing_assets()`, inspecting hundreds or thousands of prims for broken asset paths triggered redundant calls to `stage.GetRootLayer()` and repeated `os.path.exists()` filesystem stat calls for identical textures, materials, and reference paths across prims. In complex stages where materials/textures are reused across hundreds of geometry instances, this resulted in thousands of blocking disk I/O operations and unneeded path computations.
+
+**Action:** Pre-resolve the root layer directory once outside the stage traversal loop, cache asset existence checks in an in-memory dictionary during traversal, and defer `prim.GetPath()` stringification until an asset is confirmed missing.
