@@ -60,6 +60,22 @@ class TestSettingsManager(unittest.IsolatedAsyncioTestCase):
         reloaded = SettingsManager(config_path=self.config_file)
         self.assertEqual(reloaded.get_default_provider(), "Claude API")
 
+    def test_secure_file_and_directory_permissions(self):
+        """Verifica que el archivo y directorio de configuración se creen con permisos seguros (0o600 / 0o700)."""
+        import stat
+
+        sub_dir = os.path.join(self.temp_dir.name, "secure_config")
+        custom_config_path = os.path.join(sub_dir, "settings.json")
+        mgr = SettingsManager(config_path=custom_config_path)
+        mgr.update_provider_config("OpenAI API", api_key="sk-secret-test-key")
+
+        self.assertTrue(os.path.exists(custom_config_path))
+        if os.name != "nt":
+            dir_mode = stat.S_IMODE(os.stat(sub_dir).st_mode)
+            file_mode = stat.S_IMODE(os.stat(custom_config_path).st_mode)
+            self.assertEqual(dir_mode, 0o700)
+            self.assertEqual(file_mode, 0o600)
+
     def test_update_provider_config(self):
         """Verifica la actualización de URL, modelo y credenciales para un proveedor."""
         self.manager.update_provider_config(
