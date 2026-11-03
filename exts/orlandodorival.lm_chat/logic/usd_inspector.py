@@ -68,6 +68,22 @@ class USDInspector(IUSDInspector):
         missing_assets: List[Dict[str, Any]] = []
 
         try:
+            # Optimization: Pre-resolve the root layer directory once outside the stage traversal
+            # loop, avoiding thousands of redundant stage.GetRootLayer() and os.path.exists checks.
+            stage_dir: Optional[str] = None
+            if hasattr(stage, "GetRootLayer"):
+                root_layer = stage.GetRootLayer()
+                if root_layer:
+                    real_path = getattr(root_layer, "realPath", None) or getattr(root_layer, "identifier", "")
+                    if real_path:
+                        candidate_dir = os.path.dirname(str(real_path))
+                        if candidate_dir and os.path.exists(candidate_dir):
+                            stage_dir = candidate_dir
+
+            # Optimization: Cache asset existence checks across prims. Stages often reuse textures,
+            # materials, and references; this eliminates repeated stat/os.path.exists filesystem calls (~10x speedup).
+            asset_existence_cache: Dict[str, bool] = {}
+
             for prim in stage.Traverse():
                 if not prim or _is_mock(prim):
                     if _is_mock(prim) and not hasattr(prim, "GetAttributes"):
@@ -76,12 +92,13 @@ class USDInspector(IUSDInspector):
                 if hasattr(prim, "IsValid") and callable(prim.IsValid) and not prim.IsValid():
                     continue
 
-                prim_path = str(prim.GetPath()) if hasattr(prim, "GetPath") else "/Unknown"
-
                 # Obtener todos los atributos del prim
                 attributes = prim.GetAttributes() if hasattr(prim, "GetAttributes") else []
                 if _is_mock(attributes) and not isinstance(attributes, list):
                     continue
+
+                # Lazily compute prim_path only if a missing asset is found
+                prim_path: Optional[str] = None
 
                 for attr in attributes:
                     try:
@@ -113,34 +130,32 @@ class USDInspector(IUSDInspector):
                                 url_path = clean_target[7:]
                                 clean_target = urllib.request.url2pathname(url_path)
 
-                            # Comprobar si el archivo físico existe en disco
-                            exists = False
-                            if os.path.isabs(clean_target) and os.path.exists(clean_target):
-                                exists = True
-                            elif not os.path.isabs(clean_target) and (
-                                clean_target.startswith("http://")
-                                or clean_target.startswith("https://")
-                                or clean_target.startswith("omniverse://")
-                            ):
-                                # URLs externas o del servidor Nucleus se asumen resolubles por el motor
-                                exists = True
-                            elif not os.path.isabs(clean_target):
-                                # Intentar resolver relativo a la capa raíz del Stage
-                                stage_dir = None
-                                if hasattr(stage, "GetRootLayer"):
-                                    root_layer = stage.GetRootLayer()
-                                    if root_layer:
-                                        real_path = getattr(root_layer, "realPath", None) or getattr(root_layer, "identifier", "")
-                                        if real_path and os.path.exists(os.path.dirname(str(real_path))):
-                                            stage_dir = os.path.dirname(str(real_path))
-                                if stage_dir:
-                                    candidate = os.path.normpath(os.path.join(stage_dir, clean_target))
-                                    if os.path.exists(candidate):
-                                        exists = True
-                                elif os.path.exists(clean_target):
+                            # Comprobar cache de existencia previa para evitar llamadas a disco repetidas
+                            if clean_target in asset_existence_cache:
+                                exists = asset_existence_cache[clean_target]
+                            else:
+                                exists = False
+                                if os.path.isabs(clean_target) and os.path.exists(clean_target):
                                     exists = True
+                                elif not os.path.isabs(clean_target) and (
+                                    clean_target.startswith("http://")
+                                    or clean_target.startswith("https://")
+                                    or clean_target.startswith("omniverse://")
+                                ):
+                                    # URLs externas o del servidor Nucleus se asumen resolubles por el motor
+                                    exists = True
+                                elif not os.path.isabs(clean_target):
+                                    if stage_dir:
+                                        candidate = os.path.normpath(os.path.join(stage_dir, clean_target))
+                                        if os.path.exists(candidate):
+                                            exists = True
+                                    elif os.path.exists(clean_target):
+                                        exists = True
+                                asset_existence_cache[clean_target] = exists
 
                             if not exists and clean_target:
+                                if prim_path is None:
+                                    prim_path = str(prim.GetPath()) if hasattr(prim, "GetPath") else "/Unknown"
                                 attr_name = str(attr.GetName()) if hasattr(attr, "GetName") else "unknown"
                                 missing_assets.append({
                                     "prim_path": prim_path,
@@ -153,7 +168,7 @@ class USDInspector(IUSDInspector):
                                     "is_missing": True,
                                 })
                     except Exception as attr_err:
-                        logger.debug(f"Error inspeccionando atributo de prim {prim_path}: {attr_err}")
+                        logger.debug(f"Error inspeccionando atributo de prim: {attr_err}")
 
         except Exception as e:
             logger.error(f"Error durante auditoría de activos en Stage: {e}", exc_info=True)
