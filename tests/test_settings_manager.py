@@ -211,6 +211,23 @@ class TestSettingsManager(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(models, list)
         self.assertTrue(len(models) > 0)
 
+    def test_secure_file_and_directory_permissions(self):
+        """Verifica que settings.json y su directorio se creen con permisos restrictivos POSIX (0o600 / 0o700)."""
+        import stat
+
+        custom_dir = os.path.join(self.temp_dir.name, "secure_settings_dir")
+        custom_file = os.path.join(custom_dir, "settings.json")
+
+        secure_manager = SettingsManager(config_path=custom_file)
+        secure_manager.update_provider_config("OpenAI API", api_key="sk-secret-test-key")
+
+        self.assertTrue(os.path.exists(custom_file))
+        if os.name != "nt":
+            dir_mode = stat.S_IMODE(os.stat(custom_dir).st_mode)
+            file_mode = stat.S_IMODE(os.stat(custom_file).st_mode)
+            self.assertEqual(dir_mode, 0o700, f"Expected 0o700 for config directory, got {oct(dir_mode)}")
+            self.assertEqual(file_mode, 0o600, f"Expected 0o600 for settings file, got {oct(file_mode)}")
+
 
 if __name__ == "__main__":
     unittest.main()
