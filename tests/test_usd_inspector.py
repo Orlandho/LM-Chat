@@ -378,3 +378,83 @@ for i in range(10):
             assert "scene_layer.usd" in status["dirty_layers"]
             assert "sublayer.usd" in status["dirty_layers"]
             assert status["has_unsaved_changes"] is True
+
+    def test_audit_missing_assets_caches_repeated_asset_existence_checks(self, tmp_path):
+        """Verifica que múltiples prims que comparten texturas reutilicen el resultado en caché."""
+        inspector = USDInspector()
+
+        valid_tex = tmp_path / "shared_texture.png"
+        valid_tex.write_text("texture")
+        missing_tex = tmp_path / "non_existent.png"
+
+        class MockAssetPath:
+            def __init__(self, path):
+                self.path = str(path)
+                self.resolvedPath = ""
+
+        class MockAttr:
+            def __init__(self, name, asset_path):
+                self._name = name
+                self._val = MockAssetPath(asset_path)
+
+            def GetName(self):
+                return self._name
+
+            def GetTypeName(self):
+                return "Asset"
+
+            def Get(self):
+                return self._val
+
+        class MockPrim:
+            def __init__(self, path, attrs):
+                self._path = path
+                self._attrs = attrs
+
+            def GetPath(self):
+                return self._path
+
+            def IsValid(self):
+                return True
+
+            def GetAttributes(self):
+                return self._attrs
+
+        missing_tex2 = tmp_path / "non_existent_2.png"
+
+        # 5 prims sharing valid_tex, 3 prims sharing missing_tex, 2 prims sharing missing_tex2
+        prims = [
+            MockPrim(f"/World/ValidMesh_{i}", [MockAttr("inputs:diffuse", str(valid_tex))])
+            for i in range(5)
+        ] + [
+            MockPrim(f"/World/MissingMesh_{i}", [MockAttr("inputs:diffuse", str(missing_tex))])
+            for i in range(3)
+        ] + [
+            MockPrim(f"/World/MissingMesh2_{i}", [MockAttr("inputs:diffuse", str(missing_tex2))])
+            for i in range(2)
+        ]
+
+        mock_stage = MagicMock()
+        mock_stage.Traverse.return_value = prims
+
+        orig_exists = os.path.exists
+        exists_call_count = 0
+
+        def counting_exists(path):
+            nonlocal exists_call_count
+            exists_call_count += 1
+            return orig_exists(path)
+
+        with patch.object(inspector, "_get_stage", return_value=mock_stage):
+            with patch("os.path.exists", side_effect=counting_exists):
+                missing = inspector.audit_missing_assets()
+
+                assert len(missing) == 5
+                # Exactly 3 distinct targets checked on disk (1 valid, 2 missing) despite 10 prims inspected
+                assert exists_call_count == 3
+                # Verify paths recorded in missing list correctly match individual prim attributes
+                assert missing[0]["raw_path"] == str(missing_tex)
+                assert missing[1]["raw_path"] == str(missing_tex)
+                assert missing[2]["raw_path"] == str(missing_tex)
+                assert missing[3]["raw_path"] == str(missing_tex2)
+                assert missing[4]["raw_path"] == str(missing_tex2)
