@@ -26,6 +26,17 @@ class TestSettingsManager(unittest.IsolatedAsyncioTestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
+    def test_save_enforces_restrictive_permissions(self):
+        """Verifica que save() aplique permisos restrictivos (0o600 / 0o700) en sistemas POSIX."""
+        self.manager.save()
+        self.assertTrue(os.path.exists(self.config_file))
+        if os.name == "posix":
+            mode = os.stat(self.config_file).st_mode & 0o777
+            self.assertEqual(mode, 0o600)
+            parent_dir = os.path.dirname(self.config_file)
+            parent_mode = os.stat(parent_dir).st_mode & 0o777
+            self.assertEqual(parent_mode, 0o700)
+
     def test_default_initialization(self):
         """Verifica los valores de inicialización por defecto."""
         self.assertEqual(self.manager.get_default_provider(), "LM Studio")
