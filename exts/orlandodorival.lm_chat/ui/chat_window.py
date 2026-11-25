@@ -1030,8 +1030,10 @@ class ChatWindow(IChatView):
 
                                 def _on_confirm():
                                     exec_btn.enabled = False
-                                    cancel_btn.enabled = False
                                     exec_btn.text = "✓ Ejecutando..."
+                                    # Mantener cancel_btn habilitado para cancelación cooperativa durante la ejecución
+                                    cancel_btn.enabled = True
+                                    cancel_btn.text = "✕ Detener"
                                     self._delegate.on_execute_plan()
 
                                 def _on_cancel():
@@ -1042,10 +1044,26 @@ class ChatWindow(IChatView):
 
                                 exec_btn.set_clicked_fn(_on_confirm)
                                 cancel_btn.set_clicked_fn(_on_cancel)
+                                self._active_plan_buttons = (exec_btn, cancel_btn)
 
                 ui.Spacer(width=margin_fraction)
 
         self._scroll_to_bottom()
+
+    def finalize_plan_confirmation_card(self, status_text: Optional[str] = None) -> None:
+        """Deshabilita los botones de la tarjeta de confirmación activa tras completar o detener la ejecución."""
+        buttons = getattr(self, "_active_plan_buttons", None)
+        if not buttons:
+            return
+        exec_btn, cancel_btn = buttons
+        try:
+            exec_btn.enabled = False
+            cancel_btn.enabled = False
+            if status_text:
+                exec_btn.text = status_text
+        except Exception:
+            pass
+        self._active_plan_buttons = None
 
     def set_button_state(self, processing: bool) -> None:
         """Alterna el estado del botón enviar.

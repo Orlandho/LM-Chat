@@ -174,7 +174,7 @@ class TestUSDInspectorAndEditing:
         """TC-EDT-004: Ejecución de transform, material binding, grouping con omni.kit.commands y undo."""
         controller = USDController()
 
-        # Probar transform_prim
+        # Probar transform_prim (usa TransformPrimSRTCommand compatible con Kit 107.3.7)
         res_trans = controller.transform_prim(
             "/World/Cube",
             translation=(10.0, 0.0, 5.0),
@@ -183,11 +183,11 @@ class TestUSDInspectorAndEditing:
         )
         assert res_trans["success"] is True
         omni.kit.commands.execute.assert_any_call(
-            "TransformPrimCommand",
+            "TransformPrimSRTCommand",
             path="/World/Cube",
-            translation=(10.0, 0.0, 5.0),
-            rotation=(0.0, 45.0, 0.0),
-            scale=(2.0, 2.0, 2.0),
+            new_translation=(10.0, 0.0, 5.0),
+            new_rotation_euler=(0.0, 45.0, 0.0),
+            new_scale=(2.0, 2.0, 2.0),
         )
 
         # Probar bind_material
@@ -199,13 +199,21 @@ class TestUSDInspectorAndEditing:
             material_path="/World/Materials/Gold",
         )
 
-        # Probar group_prims
+        # Probar group_prims con parent_path explícito (Scope + MovePrimsCommand en Kit 107.3.7)
         res_group = controller.group_prims(["/World/Cube", "/World/Sphere"], "/World/PropsGroup")
         assert res_group["success"] is True
         omni.kit.commands.execute.assert_any_call(
-            "GroupPrimsCommand",
-            prim_paths=["/World/Cube", "/World/Sphere"],
-            parent_path="/World/PropsGroup",
+            "CreatePrimWithDefaultXform",
+            prim_type="Scope",
+            prim_path="/World/PropsGroup",
+            attributes={},
+        )
+        omni.kit.commands.execute.assert_any_call(
+            "MovePrimsCommand",
+            paths_to_move={
+                "/World/Cube": "/World/PropsGroup/Cube",
+                "/World/Sphere": "/World/PropsGroup/Sphere",
+            },
         )
 
         # Probar set_prim_attribute
@@ -327,9 +335,18 @@ class TestUSDInspectorAndEditing:
         assert res["grouped_count"] == 3
         assert res["parent_path"] == "/World/Furniture"
         omni.kit.commands.execute.assert_any_call(
-            "GroupPrimsCommand",
-            prim_paths=loose_furniture,
-            parent_path="/World/Furniture",
+            "CreatePrimWithDefaultXform",
+            prim_type="Scope",
+            prim_path="/World/Furniture",
+            attributes={},
+        )
+        omni.kit.commands.execute.assert_any_call(
+            "MovePrimsCommand",
+            paths_to_move={
+                "/World/Chair_01": "/World/Furniture/Chair_01",
+                "/World/Table_01": "/World/Furniture/Table_01",
+                "/World/Lamp_01": "/World/Furniture/Lamp_01",
+            },
         )
 
     def test_tc_edt_004_mass_edit_undo_compound_block(self):

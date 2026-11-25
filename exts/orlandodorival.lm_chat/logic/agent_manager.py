@@ -18,7 +18,15 @@ import time
 import re
 from typing import Optional, Callable, Dict, Any, List
 
-from core.interfaces import ExecutionMode, IMCPClientRegistry
+from core.interfaces import (
+    CancellationToken,
+    ExecutionBudget,
+    ExecutionMode,
+    ExecutionResult,
+    IExecutionEngine,
+    IMCPClientRegistry,
+)
+from core.policies import redact_secrets
 from .inference_router import InferenceRouter
 from .usd_controller import USDController
 from logic.logger import get_logger
@@ -29,8 +37,8 @@ _PYTHON_CODE_PATTERN = re.compile(r"```python\s*(.*?)\s*```", re.DOTALL)
 logger = get_logger("AgentManager")
 
 
-class AgentManager:
-    """Orchestrates conversations, provider routing, reasoning streams, and execution modes."""
+class AgentManager(IExecutionEngine):
+    """Orchestrates conversations, provider routing, reasoning streams, and bounded execution modes."""
 
     def __init__(
         self,
@@ -42,6 +50,7 @@ class AgentManager:
         execution_mode: str = ExecutionMode.IMMEDIATE.value,
         mcp_registry: Optional[IMCPClientRegistry] = None,
         usd_controller: Optional[USDController] = None,
+        execution_budget: Optional[ExecutionBudget] = None,
     ) -> None:
         """
         Initializes the AgentManager with inference router, USD controller, and execution mode.
@@ -55,6 +64,7 @@ class AgentManager:
             execution_mode (str): 'immediate' or 'plan_and_confirm'.
             mcp_registry (Optional[IMCPClientRegistry]): Registry for MCP tools.
             usd_controller (Optional[USDController]): USDController instance for stage execution.
+            execution_budget (Optional[ExecutionBudget]): Presupuesto cooperativo de ejecución.
         """
         if router:
             self._router = router
@@ -65,6 +75,8 @@ class AgentManager:
 
         self._usd_controller = usd_controller or USDController()
         self._execution_mode: str = execution_mode
+        self._execution_budget: ExecutionBudget = execution_budget or ExecutionBudget()
+        self._active_cancellation_tokens: List[CancellationToken] = []
         self._pending_code: Optional[str] = None
         self._turbo_mode: bool = False
         self._mcp_registry: Optional[IMCPClientRegistry] = mcp_registry
@@ -80,18 +92,28 @@ class AgentManager:
 
     def _get_system_prompt_for_mode(self, mode: str) -> str:
         """Genera la directiva del sistema adaptada al modo de ejecución activo."""
+        reversible_guidance = (
+            "Usa siempre comandos reversibles mediante `controller.create_prim(...)`, "
+            "`controller.transform_prim(...)`, `controller.set_prim_attribute(...)`, "
+            "`controller.bind_material(...)`, `controller.group_prims(...)` o "
+            "`omni.kit.commands.execute(...)` para preservar el historial Ctrl+Z/Ctrl+Y; "
+            "evita escrituras directas sobre el Stage (`stage.DefinePrim`, `UsdGeom.*.Define`) "
+            "y llamadas bloqueantes como `time.sleep`."
+        )
         if mode == ExecutionMode.PLAN_AND_CONFIRM.value or mode == "plan_and_confirm":
             return (
                 "Eres un asistente de IA avanzado para NVIDIA Omniverse. Operas en MODO PLAN & REVISIÓN (Jules / Gemini CLI style). "
                 "Cuando el usuario te solicite crear, instanciar o modificar objetos 3D: "
                 "1. Presenta primero una breve lista numerada con los pasos de tu plan de acción. "
-                "2. Muestra el bloque de código Python usando omni.usd y pxr dentro de un bloque delimitado por ```python y ``` "
-                "sin asumir que ya ha sido ejecutado. Espera la confirmación interactiva del usuario antes de aplicar cambios en el Stage."
+                "2. Muestra el bloque de código Python dentro de un bloque delimitado por ```python y ``` "
+                f"sin asumir que ya ha sido ejecutado. {reversible_guidance} "
+                "Espera la confirmación interactiva del usuario antes de aplicar cambios en el Stage."
             )
         return (
             "Eres un asistente de IA avanzado para NVIDIA Omniverse. Puedes conversar libremente y ayudar al usuario con cualquier duda. "
             "SIN EMBARGO, si el usuario te pide crear, instanciar o modificar objetos 3D, debes cumplir su orden escribiendo el código en Python "
-            "usando omni.usd y pxr dentro de un bloque delimitado por ```python y ```. Puedes acompañar el código con una explicación amigable."
+            f"dentro de un bloque delimitado por ```python y ```. {reversible_guidance} "
+            "Puedes acompañar el código con una explicación amigable."
         )
 
     @property
@@ -175,6 +197,122 @@ class AgentManager:
         self._messages = [{"role": "system", "content": self._system_prompt}]
         logger.info("Conversación reiniciada reteniendo system prompt")
 
+    @staticmethod
+    def _coerce_execution_result(raw: Any) -> ExecutionResult:
+        """Normaliza resultados dict o ExecutionResult provenientes del controlador o dobles de prueba."""
+        if isinstance(raw, ExecutionResult):
+            return raw
+        if isinstance(raw, dict):
+            return ExecutionResult(
+                success=bool(raw.get("success", False)),
+                error_msg=redact_secrets(raw.get("error_msg")),
+                error_type=raw.get("error_type"),
+                line_number=raw.get("line_number"),
+                traceback_str=redact_secrets(raw.get("traceback_str")),
+                cancelled=bool(raw.get("cancelled", False)),
+                execution_time_ms=float(raw.get("execution_time_ms", 0.0)),
+                partial_changes_rolled_back=bool(raw.get("partial_changes_rolled_back", False)),
+                metadata=raw.get("metadata"),
+            )
+        return ExecutionResult(success=bool(raw))
+
+    def _is_execute_code_overridden(self) -> bool:
+        """Detecta si un doble de prueba sobrescribió `execute_code` directamente en la instancia."""
+        ctrl = self._usd_controller
+        return (
+            hasattr(ctrl, "__dict__")
+            and "execute_code" in ctrl.__dict__
+            and "execute_code_async" not in ctrl.__dict__
+        )
+
+    def execute_script(
+        self,
+        python_code: str,
+        dry_run: bool = False,
+        budget: Optional[ExecutionBudget] = None,
+        cancellation_token: Optional[CancellationToken] = None,
+    ) -> ExecutionResult:
+        """Ejecuta código síncronamente de forma acotada (contrato IExecutionEngine)."""
+        if dry_run:
+            is_valid, err = self._usd_controller.policy.validate_code(python_code)
+            return ExecutionResult(
+                success=is_valid,
+                error_msg=redact_secrets(err),
+                error_type=None if is_valid else "SecurityPolicyError",
+                metadata={"dry_run": True},
+            )
+
+        token = cancellation_token or CancellationToken()
+        eff_budget = budget or self._execution_budget
+        self._active_cancellation_tokens.append(token)
+        try:
+            if self._is_execute_code_overridden():
+                raw = self._usd_controller.execute_code(python_code)
+            else:
+                raw = self._usd_controller.execute_code(
+                    python_code,
+                    budget=eff_budget,
+                    cancellation_token=token,
+                )
+            return self._coerce_execution_result(raw)
+        finally:
+            if token in self._active_cancellation_tokens:
+                self._active_cancellation_tokens.remove(token)
+
+    async def execute_script_async(
+        self,
+        python_code: str,
+        budget: Optional[ExecutionBudget] = None,
+        cancellation_token: Optional[CancellationToken] = None,
+    ) -> ExecutionResult:
+        """Ejecuta código de forma acotada, cancelable y sin bloquear la UI de Kit (contrato IExecutionEngine)."""
+        token = cancellation_token or CancellationToken()
+        eff_budget = budget or self._execution_budget
+        self._active_cancellation_tokens.append(token)
+        try:
+            if self._is_execute_code_overridden():
+                await asyncio.sleep(0)
+                if token.is_cancellation_requested:
+                    return ExecutionResult(
+                        success=False,
+                        error_msg="La ejecución fue cancelada por el usuario.",
+                        error_type="ExecutionCancelledError",
+                        cancelled=True,
+                    )
+                raw = self._usd_controller.execute_code(python_code)
+                return self._coerce_execution_result(raw)
+
+            return await self._usd_controller.execute_code_async(
+                python_code,
+                budget=eff_budget,
+                cancellation_token=token,
+            )
+        finally:
+            if token in self._active_cancellation_tokens:
+                self._active_cancellation_tokens.remove(token)
+
+    def format_reflection_prompt(self, failed_code: str, traceback_str: str) -> str:
+        """Construye un prompt de autorreflexión seguro y redactado para corrección ReAct."""
+        safe_tb = redact_secrets(traceback_str or "Error de ejecución desconocido") or ""
+        return (
+            f"El código falló con este error:\n{safe_tb}\n\n"
+            "Por favor, analiza el problema y devuelve el código corregido "
+            "dentro de las etiquetas ```python y ```, utilizando comandos reversibles "
+            "(`controller.create_prim`, `controller.transform_prim`, `controller.set_prim_attribute` "
+            "u `omni.kit.commands.execute`) y evitando llamadas bloqueantes."
+        )
+
+    def cancel_active_execution(self) -> bool:
+        """Solicita la cancelación cooperativa de cualquier script actualmente en ejecución."""
+        cancelled_any = False
+        for token in list(self._active_cancellation_tokens):
+            if not token.is_cancellation_requested:
+                token.cancel()
+                cancelled_any = True
+        if cancelled_any:
+            logger.info("Cancelación cooperativa solicitada para la ejecución activa.")
+        return cancelled_any
+
     def has_pending_code(self) -> bool:
         """Retorna True si hay un bloque de código propuesto esperando confirmación del usuario."""
         return self._pending_code is not None
@@ -183,12 +321,14 @@ class AgentManager:
         """Retorna el código propuesto pendiente de confirmación."""
         return self._pending_code
 
-    def execute_pending_code(self) -> Dict[str, Any]:
+    def execute_pending_code(
+        self,
+        budget: Optional[ExecutionBudget] = None,
+        cancellation_token: Optional[CancellationToken] = None,
+    ) -> Dict[str, Any]:
         """
-        Ejecuta en el Stage OpenUSD el código previamente propuesto en Modo Plan & Confirm.
-
-        Returns:
-            Dict[str, Any]: Resultado de la ejecución con status 'success' y detalles.
+        Ejecuta síncronamente en el Stage OpenUSD el código propuesto en Modo Plan & Confirm.
+        Preferir `execute_pending_code_async` desde el bucle de eventos GUI de Kit.
         """
         if not self._pending_code:
             return {"success": False, "error_msg": "No hay código pendiente de confirmación para ejecutar."}
@@ -196,19 +336,48 @@ class AgentManager:
         code_to_exec = self._pending_code
         self._pending_code = None
         logger.info("Ejecutando código propuesto tras confirmación interactiva del usuario...")
-        res = self._usd_controller.execute_code(code_to_exec)
-        return res
+        if self._is_execute_code_overridden():
+            return self._usd_controller.execute_code(code_to_exec)
+        res = self.execute_script(
+            code_to_exec,
+            dry_run=False,
+            budget=budget,
+            cancellation_token=cancellation_token,
+        )
+        return res.to_dict()
+
+    async def execute_pending_code_async(
+        self,
+        budget: Optional[ExecutionBudget] = None,
+        cancellation_token: Optional[CancellationToken] = None,
+    ) -> ExecutionResult:
+        """
+        Ejecuta de forma acotada, cancelable y no bloqueante el código propuesto en Modo Plan & Confirm.
+        """
+        if not self._pending_code:
+            return ExecutionResult(
+                success=False,
+                error_msg="No hay código pendiente de confirmación para ejecutar.",
+                error_type="ValueError",
+            )
+
+        code_to_exec = self._pending_code
+        self._pending_code = None
+        logger.info("Ejecutando código propuesto de forma asíncrona tras confirmación del usuario...")
+        return await self.execute_script_async(
+            code_to_exec,
+            budget=budget,
+            cancellation_token=cancellation_token,
+        )
 
     def cancel_pending_code(self) -> Dict[str, Any]:
         """
-        Descarta el código propuesto en Modo Plan & Confirm dejando la escena intacta.
-
-        Returns:
-            Dict[str, Any]: Confirmación de cancelación.
+        Descarta el código propuesto en Modo Plan & Confirm y solicita cancelar ejecución activa si existe.
         """
+        active_cancelled = self.cancel_active_execution()
         self._pending_code = None
         logger.info("Propuesta de código descartada por el usuario. Escena OpenUSD intacta.")
-        return {"success": True, "cancelled": True}
+        return {"success": True, "cancelled": True, "active_execution_cancelled": active_cancelled}
 
     async def process_prompt(
         self,
@@ -453,9 +622,12 @@ class AgentManager:
 
                         return full_content + confirm_prompt
 
-                    # Modo Inmediato (⚡ Fast Act / Autónomo)
-                    logger.info("Modo Inmediato: Detectado bloque de código OpenUSD. Ejecutando de forma autónoma...")
-                    exec_result = self._usd_controller.execute_code(extracted_code)
+                    # Modo Inmediato (⚡ Fast Act / Autónomo) — ejecución acotada y cancelable
+                    logger.info("Modo Inmediato: Detectado bloque de código OpenUSD. Ejecutando de forma acotada...")
+                    exec_result = await self.execute_script_async(
+                        extracted_code,
+                        budget=self._execution_budget,
+                    )
 
                     if exec_result.get("success"):
                         self._messages.append({"role": "assistant", "content": full_content})
@@ -464,8 +636,21 @@ class AgentManager:
                             append_callback(success_msg)
                         logger.info("Código OpenUSD ejecutado con éxito")
                         return full_content + success_msg
+                    elif exec_result.get("cancelled"):
+                        self._messages.append({"role": "assistant", "content": full_content})
+                        rb_note = (
+                            " Cambios parciales revertidos."
+                            if exec_result.get("partial_changes_rolled_back")
+                            else ""
+                        )
+                        cancel_msg = f"\n\n[Sistema: Ejecución cancelada por el usuario.{rb_note}]"
+                        if append_callback:
+                            append_callback(cancel_msg)
+                        logger.info("Ejecución OpenUSD cancelada cooperativamente por el usuario.")
+                        return full_content + cancel_msg
                     else:
-                        error_msg = exec_result.get("error_msg")
+                        error_msg = redact_secrets(exec_result.get("error_msg")) or "Error desconocido"
+                        error_context = redact_secrets(exec_result.get("traceback_str")) or error_msg
                         logger.warning(f"Error en ejecución OpenUSD: {error_msg}")
 
                         if attempt < max_retries:
@@ -476,11 +661,7 @@ class AgentManager:
                             self._messages.append({"role": "assistant", "content": full_content})
                             self._messages.append({
                                 "role": "user",
-                                "content": (
-                                    f"El código falló con este error: {error_msg}. "
-                                    "Por favor, analiza el problema y devuelve el código corregido "
-                                    "dentro de las etiquetas ```python y ```."
-                                ),
+                                "content": self.format_reflection_prompt(extracted_code, error_context),
                             })
 
                             # Give UI time to update before next attempt

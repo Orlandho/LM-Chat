@@ -156,7 +156,11 @@ raise RuntimeError('Stage mutation crashed halfway')
 
             res_trans = controller.transform_prim("/World/Sphere", translation=[0, 10, 0])
             assert res_trans["success"] is False
-            assert "Error ejecutando TransformPrimCommand" in res_trans["error_msg"]
+            assert "Error ejecutando TransformPrimSRTCommand" in res_trans["error_msg"]
+
+            res_trans_mat = controller.transform_prim("/World/Sphere", new_transform_matrix=[[1, 0, 0, 0]])
+            assert res_trans_mat["success"] is False
+            assert "Error ejecutando TransformPrimCommand" in res_trans_mat["error_msg"]
 
             res_mat = controller.bind_material("/World/Sphere", "/World/Mat")
             assert res_mat["success"] is False
@@ -164,7 +168,11 @@ raise RuntimeError('Stage mutation crashed halfway')
 
             res_grp = controller.group_prims(["/World/Sphere"], "/World/Group")
             assert res_grp["success"] is False
-            assert "Error ejecutando GroupPrimsCommand" in res_grp["error_msg"]
+            assert "Error ejecutando CreatePrimWithDefaultXform" in res_grp["error_msg"]
+
+            res_grp_default = controller.group_prims(["/World/Sphere"], parent_path=None)
+            assert res_grp_default["success"] is False
+            assert "Error ejecutando GroupPrimsCommand" in res_grp_default["error_msg"]
 
             res_attr = controller.set_prim_attribute("/World/Sphere", "visibility", "invisible")
             assert res_attr["success"] is False

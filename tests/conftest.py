@@ -35,8 +35,10 @@ class StrictKitUndoDouble(ModuleType):
 
     def __init__(self):
         super().__init__("omni.kit.undo")
-        self.begin_group = MagicMock(name="begin_group")
-        self.end_group = MagicMock(name="end_group")
+        def _strict_zero_arg():
+            return None
+        self.begin_group = MagicMock(name="begin_group", side_effect=_strict_zero_arg)
+        self.end_group = MagicMock(name="end_group", side_effect=_strict_zero_arg)
         self.undo = MagicMock(name="undo", return_value=True)
         self.redo = MagicMock(name="redo", return_value=True)
         self.can_undo = MagicMock(name="can_undo", return_value=True)

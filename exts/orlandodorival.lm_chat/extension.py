@@ -18,11 +18,13 @@ if __package__:
         from .ui.models import ChatModel
         from .logic.agent_manager import AgentManager
         from .logic.chat_history import LocalChatHistoryManager
+        from .core.policies import redact_secrets
     except (ImportError, AttributeError):
         from ui.chat_window import ChatWindow
         from ui.models import ChatModel
         from logic.agent_manager import AgentManager
         from logic.chat_history import LocalChatHistoryManager
+        from core.policies import redact_secrets
 else:
     from ui.chat_window import ChatWindow
     from ui.models import ChatModel
@@ -30,6 +32,7 @@ else:
     from logic.chat_history import LocalChatHistoryManager
     from logic.diagnostics import diagnose_inference_failure
     from logic.logger import get_logger
+    from core.policies import redact_secrets
 
 logger = get_logger("Extension")
 
@@ -43,6 +46,7 @@ class LMChatExtension(omni.ext.IExt):
 
         self._history_manager = LocalChatHistoryManager()
         self._agent_manager = AgentManager()
+        self._active_plan_task = None
         self._model = ChatModel(history_manager=self._history_manager)
         self._model.subscribe(self._on_model_updated)
 
@@ -65,23 +69,72 @@ class LMChatExtension(omni.ext.IExt):
                 self._on_session_changed(self._model.current_session)
 
     def _on_plan_action(self, action: str):
-        """Maneja las acciones interactivas de confirmación o cancelación de planes (PLAN 3)."""
+        """Maneja las acciones interactivas de confirmación o cancelación de planes sin bloquear el hilo de UI."""
+        if not self._agent_manager:
+            return
         if action == "execute":
-            res = self._agent_manager.execute_pending_code()
-            if res.get("success"):
-                msg = "✓ Código OpenUSD ejecutado exitosamente en el Stage."
-                self._chat_window.add_message_bubble("assistant", msg)
-                self._chat_window.finalize_last_assistant_message(msg)
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+
+            if loop and loop.is_running():
+                if self._chat_window:
+                    self._chat_window.update_status("Ejecutando en Stage...", is_loading=True)
+                self._active_plan_task = loop.create_task(self._execute_pending_plan_async())
             else:
-                err = res.get("error_msg", "Error desconocido")
-                msg = f"⚠️ Error al ejecutar en Stage: {err}"
-                self._chat_window.add_message_bubble("assistant", msg)
-                self._chat_window.finalize_last_assistant_message(msg)
+                res = self._agent_manager.execute_pending_code()
+                self._report_plan_execution_result(res)
         elif action == "cancel":
-            self._agent_manager.cancel_pending_code()
-            msg = "✕ Ejecución cancelada por el usuario. Escena OpenUSD intacta."
-            self._chat_window.add_message_bubble("assistant", msg)
-            self._chat_window.finalize_last_assistant_message(msg)
+            cancel_res = self._agent_manager.cancel_pending_code()
+            if cancel_res.get("active_execution_cancelled"):
+                msg = "✕ Cancelación solicitada. Deteniendo ejecución activa y revirtiendo cambios parciales..."
+                if self._chat_window:
+                    self._chat_window.add_message_bubble("assistant", msg)
+                    self._chat_window.finalize_last_assistant_message(msg)
+                    self._chat_window.update_status("Cancelando...", is_loading=True)
+            else:
+                msg = "✕ Ejecución cancelada por el usuario. Escena OpenUSD intacta."
+                if self._chat_window:
+                    self._chat_window.add_message_bubble("assistant", msg)
+                    self._chat_window.finalize_last_assistant_message(msg)
+                    if hasattr(self._chat_window, "finalize_plan_confirmation_card"):
+                        self._chat_window.finalize_plan_confirmation_card("✕ Cancelado")
+                    self._chat_window.update_status("Listo", is_loading=False)
+
+    async def _execute_pending_plan_async(self):
+        """Ejecuta el código pendiente en tramos acotados y cancelables sin congelar la UI de Kit."""
+        try:
+            res = await self._agent_manager.execute_pending_code_async()
+            self._report_plan_execution_result(res)
+        except Exception as e:
+            logger.error(f"Error ejecutando plan confirmado de forma asíncrona: {redact_secrets(str(e))}", exc_info=e)
+            self._report_plan_execution_result({"success": False, "error_msg": redact_secrets(str(e))})
+        finally:
+            self._active_plan_task = None
+            if self._chat_window:
+                self._chat_window.update_status("Listo", is_loading=False)
+
+    def _report_plan_execution_result(self, res):
+        """Publica en la interfaz el resultado estructurado de ejecutar el plan confirmado."""
+        if not self._chat_window:
+            return
+        if res.get("success"):
+            msg = "✓ Código OpenUSD ejecutado exitosamente en el Stage."
+            btn_state = "✓ Ejecutado"
+        elif res.get("cancelled"):
+            rb = " Cambios parciales revertidos." if res.get("partial_changes_rolled_back") else ""
+            msg = f"✕ Ejecución detenida cooperativamente por el usuario.{rb}"
+            btn_state = "✕ Detenido"
+        else:
+            err = redact_secrets(res.get("error_msg", "Error desconocido")) or "Error desconocido"
+            rb = " (cambios parciales revertidos)" if res.get("partial_changes_rolled_back") else ""
+            msg = f"⚠️ Error al ejecutar en Stage{rb}: {err}"
+            btn_state = "⚠️ Error"
+        if hasattr(self._chat_window, "finalize_plan_confirmation_card"):
+            self._chat_window.finalize_plan_confirmation_card(btn_state)
+        self._chat_window.add_message_bubble("assistant", msg)
+        self._chat_window.finalize_last_assistant_message(msg)
 
     def _on_model_updated(self):
         """Synchronizes AgentManager provider, model, execution mode and turbo mode whenever ChatModel changes."""
@@ -205,6 +258,9 @@ class LMChatExtension(omni.ext.IExt):
     def on_shutdown(self):
         """Called when the extension is disabled."""
         print("[orlandodorival.lm_chat] LM-Chat Extension shutdown")
+        if hasattr(self, "_agent_manager") and self._agent_manager:
+            self._agent_manager.cancel_active_execution()
+        self._active_plan_task = None
         if hasattr(self, "_chat_window") and self._chat_window:
             self._chat_window.destroy()
             self._chat_window = None

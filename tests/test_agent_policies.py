@@ -18,15 +18,17 @@ class TestSpatialSecurityPolicy:
     """Suite de pruebas de gobernanza y seguridad de código para agentes espaciales."""
 
     def test_valid_openusd_code_allowed(self):
-        """Código legítimo de creación y manipulación en OpenUSD es aprobado."""
+        """Código legítimo de lectura y mutación reversible vía comandos de Kit OpenUSD es aprobado."""
         policy = SpatialSecurityPolicy()
         safe_code = """
+import omni.kit.commands
 import omni.usd
-from pxr import Usd, UsdGeom, Gf
+from pxr import Gf
 
 stage = omni.usd.get_context().get_stage()
-cube = UsdGeom.Cube.Define(stage, '/World/Cube')
-cube.AddTranslateOp().Set(Gf.Vec3d(0.0, 10.0, 0.0))
+omni.kit.commands.execute("CreatePrimWithDefaultXform", prim_type="Cube", prim_path="/World/Cube")
+controller.transform_prim("/World/Cube", translation=[0.0, 10.0, 0.0])
+prim = stage.GetPrimAtPath("/World/Cube")
 """
         valid, err = policy.validate_code(safe_code)
         assert valid is True

@@ -117,6 +117,12 @@ class ExecutionMode(str, Enum):
     IMMEDIATE = "immediate"  # ⚡ Fast Act / Ejecución autónoma instantánea
     PLAN_AND_CONFIRM = "plan_and_confirm"  # 📝 Jules / Gemini CLI style: Plan primero, confirmación requerida
 
+
+class ExecutionAffinity(str, Enum):
+    """Clasificación de afinidad de hilo para ejecución segura en Omniverse Kit."""
+    KIT_MAIN_THREAD = "kit_main_thread"  # Mutaciones USD / llamadas omni, pxr, controller, inspector
+    PURE_COMPUTE = "pure_compute"  # Cálculo puro sin dependencias de Kit/USD (elegible para worker cooperativo)
+
 @dataclass
 class MCPServerConfig:
     """Configuración para registrar y orquestar servidores MCP."""
@@ -208,6 +214,10 @@ class IAgentPolicy(ABC):
         """Retorna el diccionario restringido de builtins seguros para el entorno de ejecución."""
         return {}
 
+    def classify_execution_affinity(self, python_code: str) -> ExecutionAffinity:
+        """Clasifica si el script requiere el hilo principal de Kit o puede ejecutarse como cálculo puro."""
+        return ExecutionAffinity.KIT_MAIN_THREAD
+
     @abstractmethod
     def is_prim_protected(self, prim_path: str) -> bool:
         """Determina si una ruta en el Stage corresponde a un elemento protegido del sistema."""
@@ -218,10 +228,38 @@ class IUSDController(ABC):
     """Contrato formal para ejecución segura, no-destructiva y reversible en OpenUSD (F01)."""
 
     @abstractmethod
-    def execute_code(self, python_code: str) -> Dict[str, Any]:
-        """Ejecuta código Python de forma segura, agrupando mutaciones en un bloque reversible (begin_group/end_group).
-        Si ocurre un error durante la ejecución, revierte atómicamente las mutaciones parciales."""
+    def execute_code(
+        self,
+        python_code: str,
+        budget: Optional["ExecutionBudget"] = None,
+        cancellation_token: Optional["CancellationToken"] = None,
+    ) -> Dict[str, Any]:
+        """Ejecuta código Python de forma acotada y segura, agrupando mutaciones en un bloque reversible
+        (begin_group/end_group). Si ocurre un error o cancelación durante la ejecución, revierte
+        atómicamente las mutaciones parciales."""
         pass
+
+    async def execute_code_async(
+        self,
+        python_code: str,
+        budget: Optional["ExecutionBudget"] = None,
+        cancellation_token: Optional["CancellationToken"] = None,
+    ) -> "ExecutionResult":
+        """Ejecuta código de forma acotada y cancelable respetando la afinidad de hilo de Kit."""
+        res = self.execute_code(python_code, budget=budget, cancellation_token=cancellation_token)
+        if isinstance(res, ExecutionResult):
+            return res
+        return ExecutionResult(
+            success=bool(res.get("success", False)),
+            error_msg=res.get("error_msg"),
+            error_type=res.get("error_type"),
+            line_number=res.get("line_number"),
+            traceback_str=res.get("traceback_str"),
+            cancelled=bool(res.get("cancelled", False)),
+            execution_time_ms=float(res.get("execution_time_ms", 0.0)),
+            partial_changes_rolled_back=bool(res.get("partial_changes_rolled_back", False)),
+            metadata=res.get("metadata"),
+        )
 
     @abstractmethod
     def create_prim(
@@ -260,6 +298,10 @@ class IUSDController(ABC):
         """Modifica un atributo de un prim usando ChangePropertyCommand."""
         pass
 
+    def delete_prims(self, prim_paths: List[str]) -> Dict[str, Any]:
+        """Elimina uno o más prims de forma reversible mediante DeletePrimsCommand."""
+        return {"success": False, "error_msg": "delete_prims not implemented"}
+
 
 class IMCPClientRegistry(ABC):
     """Contrato para el cliente y registro de herramientas MCP (Jules Issue #37)."""
@@ -279,13 +321,16 @@ class IMCPClientRegistry(ABC):
         pass
 
 
-class ExecutionCancelledError(Exception):
-    """Excepción lanzada cuando una ejecución es cancelada cooperativamente."""
+class ExecutionCancelledError(BaseException):
+    """Excepción de control lanzada cuando una ejecución es cancelada cooperativamente.
+    Hereda de BaseException (como asyncio.CancelledError) para evitar que `except Exception:`
+    en código generado por IA silencie la cancelación."""
     pass
 
 
-class ExecutionBudgetExceededError(Exception):
-    """Excepción lanzada cuando la ejecución excede el presupuesto temporal o de pasos."""
+class ExecutionBudgetExceededError(BaseException):
+    """Excepción de control lanzada cuando la ejecución excede el presupuesto temporal o de pasos.
+    Hereda de BaseException para evitar que `except Exception:` en scripts generados la suprima."""
     pass
 
 
@@ -332,7 +377,9 @@ class ExecutionBudget:
     max_wall_time_seconds: float = 5.0
     max_loop_iterations: int = 10_000
     max_prims_creation_limit: int = 500
-    slice_yield_interval_seconds: float = 0.016  # ~1 frame a 60 FPS
+    slice_yield_interval_seconds: float = 0.016  # Presupuesto objetivo por tramo cooperativo
+    max_total_steps: int = 50_000
+    yield_every_n_steps: int = 250
 
 
 @dataclass
@@ -349,10 +396,20 @@ class ExecutionResult:
     metadata: Optional[Dict[str, Any]] = None
 
     def __getitem__(self, key: str) -> Any:
-        return getattr(self, key)
+        if hasattr(self, key):
+            return getattr(self, key)
+        raise KeyError(key)
+
+    def __contains__(self, key: object) -> bool:
+        return isinstance(key, str) and key in self.to_dict()
+
+    def keys(self):
+        return self.to_dict().keys()
 
     def get(self, key: str, default: Any = None) -> Any:
-        return getattr(self, key, default)
+        if hasattr(self, key):
+            return getattr(self, key)
+        return default
 
     def to_dict(self) -> Dict[str, Any]:
         """Serializa el resultado a un diccionario estándar."""
@@ -395,6 +452,10 @@ class IExecutionEngine(ABC):
     def format_reflection_prompt(self, failed_code: str, traceback_str: str) -> str:
         """Construye el prompt de autorreflexión para que el LLM corrija el código."""
         pass
+
+    def cancel_active_execution(self) -> bool:
+        """Solicita cancelación cooperativa de la ejecución actualmente activa, si existe."""
+        return False
 
 class IChatView(ABC):
     """Contrato para la interfaz gráfica omni.ui (Jules Issue #39)."""
