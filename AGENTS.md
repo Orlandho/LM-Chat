@@ -85,12 +85,13 @@ In `.github/workflows/release.yml`, releases automatically build a zip archive w
 ## 🔀 5. Git Workflow & Branching Strategy
 
 1. **Branch Protection:** Pushing directly to `main` is strictly prohibited by repository rules.
-2. **Feature Branches:** All work must originate from dedicated branches:
+2. **Feature Branches:** All work must originate from dedicated branches linked to a Jira `LMCHAT` issue when applicable:
    - `feat/<feature-name>` for new features.
    - `fix/<bug-name>` for bug fixes.
+   - `docs/<issue-key>-<topic>` for documentation and governance updates.
    - `jules/<task-description>` for autonomous tasks dispatched to Jules.
 3. **Pull Request & Code Review:**
-   - Every PR must detail: (1) Problem solved, (2) Architectural changes, (3) Testing evidence.
+   - Every PR must detail: (1) Problem solved, (2) Architectural changes, (3) Testing evidence, and reference the associated `LMCHAT-XX` Jira key.
    - All AI-generated PRs must undergo human/supervisory code review prior to merge.
 4. **Merge Method:** Always use **Squash and Merge** to maintain a clean, linear, and bisect-friendly git history on `main`.
 
@@ -117,4 +118,26 @@ To guarantee that `LM-Chat™` remains permanently at the cutting edge of Spatia
 
 3. **Software Architecture Invariant (Dynamic Self-Updating Systems):**
    - All client software developed in this repository must implement active discovery mechanisms (`fetch_remote_models`, dynamic `/v1/models` querying, and live GUI refresh buttons) so that end users and autonomous agents never depend on hardcoded legacy lists.
+
+---
+
+## 📚 8. Official Documentary Architecture & Knowledge Governance (Atlassian SSOT)
+
+To eliminate documentary redundancy and maintain strict traceability across tools, **all AI agents and human contributors** must follow this Single Source of Truth (SSOT) architecture without implementing bidirectional sync between platforms:
+
+1. **Confluence (`LMCHAT`, Space ID `7143426`) — Official Product & Engineering Knowledge Base:**
+   - **URL:** `https://orlandodorival.atlassian.net/wiki/spaces/LMCHAT`
+   - **Authoritative scope:** Product vision and scope (PRD, RF/RNF), UI/UX tokens (`omni.ui`), HLD & LLD architecture, diagrams (rendered PNG + editable Mermaid source), Architecture Decision Records (`02.3 — ADR`), technical specifications (`PLAN-01/02/03`), QA strategy, security threat model, operations SRE runbooks, and project manuals.
+2. **Jira (`LMCHAT`, Project ID `10033`, Board `34`) — Official Work & Delivery Tracking:**
+   - **URL:** `https://orlandodorival.atlassian.net/jira/software/projects/LMCHAT/boards/34`
+   - **Authoritative scope:** Epics, user stories, tasks, subtasks, bugs, backlog, sprints, priorities, dependencies, acceptance criteria, and verified work status (`To Do → In Progress → In Review → Testing → Done`).
+   - **Evidence-First Rule:** Never transition a feature or fix to `Done` without verifiable evidence in code, automated tests, and—where required—real NVIDIA Omniverse Kit validation.
+3. **GitHub (`Orlandho/LM-Chat`) — Official Code & Technical Contract Repository:**
+   - **URL:** `https://github.com/Orlandho/LM-Chat`
+   - **Authoritative scope:** Source code, automated tests, `AGENTS.md`, `README.md`, Omniverse skills, CI/CD workflows, live code contracts (`core/interfaces.py`), changelog, and SemVer versioning.
+4. **Legacy Documentation Repository (`Orlandho/LM-Chat-Docs`):**
+   - The former standalone documentation repository (`Orlandho/LM-Chat-Docs`) has been migrated to Confluence `LMCHAT` and Jira `LMCHAT` (tracked under `LMCHAT-13` / `LMCHAT-14`). Do **not** add new specifications, plans, or diagrams to `LM-Chat-Docs`; always consult and update Confluence `LMCHAT` and Jira `LMCHAT` instead.
+5. **Project Isolation:**
+   - Work strictly within `LMCHAT` resources. Never cross-post, link, or modify unrelated Atlassian spaces or projects (e.g., Orlando Web Card, Jira `KAN`, Confluence `SD`).
+
 
