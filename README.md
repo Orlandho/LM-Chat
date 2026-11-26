@@ -111,8 +111,17 @@ python -m pytest tests/ -v
 
 ---
 
-## 📄 Documentation & Architecture
-* [Product Branding & Specification](docs/PRODUCT_BRANDING.md)
-* [System Architecture Diagram (SVG)](docs/diagrams/omni_agent_architecture.svg)
-* [Universal Multi-Agent Charter (AGENTS.md)](AGENTS.md)
-* [Changelog](docs/CHANGELOG.md)
+## 📄 Documentation & Knowledge Governance
+
+LM-Chat uses a Single Source of Truth (SSOT) architecture across Atlassian and GitHub (no bidirectional sync):
+
+* **Product, Architecture, ADR, QA, Security & SRE Knowledge Base (Confluence `LMCHAT`):** [Confluence — LM-Chat Space](https://orlandodorival.atlassian.net/wiki/spaces/LMCHAT)
+* **Backlog, Epics, Sprints & Issue Tracking (Jira `LMCHAT`):** [Jira — LMCHAT Board 34](https://orlandodorival.atlassian.net/jira/software/projects/LMCHAT/boards/34)
+* **Repository-Local Artifacts (`Orlandho/LM-Chat`):**
+  * [Universal Multi-Agent Charter (AGENTS.md)](AGENTS.md)
+  * [Product Branding & Specification](docs/PRODUCT_BRANDING.md)
+  * [System Architecture Diagram (SVG)](docs/diagrams/omni_agent_architecture.svg)
+  * [Historical Local ADR Log](docs/architecture/03_ADR_LOG.md) *(living ADR registry maintained in [Confluence 02.3 — ADR](https://orlandodorival.atlassian.net/wiki/spaces/LMCHAT/pages/8552449))*
+  * [Changelog](docs/CHANGELOG.md)
+
+> **Note for Contributors & AI Agents:** The legacy standalone repository `Orlandho/LM-Chat-Docs` has been migrated to Confluence `LMCHAT` and Jira `LMCHAT` (pending independent audit before archival). Always consult Confluence `LMCHAT` for specifications, diagrams, and runbooks, and Jira `LMCHAT` for active tasks and acceptance criteria.

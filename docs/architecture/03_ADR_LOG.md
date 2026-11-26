@@ -1,6 +1,8 @@
 # Registro de Decisiones Arquitectónicas (ADR Log)
 
-Este archivo consolida las decisiones arquitectónicas clave del Agente Híbrido en NVIDIA Omniverse, para mantener la transparencia en la evolución técnica del ecosistema. Todo nuevo patrón de diseño o alteración estructural debe ser registrado usando la siguiente plantilla.
+> **Fuente oficial vigente (SSOT):** A partir de la migración documental a Atlassian (`LMCHAT-12`), el registro vivo de Decisiones Arquitectónicas (ADR-001 en adelante) se mantiene oficialmente en Confluence: **[02.3 — Registro de Decisiones Arquitectónicas (ADR)](https://orlandodorival.atlassian.net/wiki/spaces/LMCHAT/pages/8552449)** (seguimiento en Jira **[LMCHAT-28](https://orlandodorival.atlassian.net/browse/LMCHAT-28)**). Este archivo se conserva en el repositorio únicamente como referencia histórica local de `ADR-001`.
+
+Este archivo consolida las decisiones arquitectónicas clave del Agente Híbrido en NVIDIA Omniverse, para mantener la transparencia en la evolución técnica del ecosistema. Todo nuevo patrón de diseño o alteración estructural debe ser registrado en Confluence `LMCHAT` usando la plantilla oficial.
 
 ---
 
